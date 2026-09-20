@@ -130,3 +130,17 @@ def test_crop_clamps_to_the_frame():
     det = Detection((-50, -50, 20, 20), score=0.5, frame_index=0)
     patch = identify.crop(frame, det)
     assert patch.shape[0] > 0 and patch.shape[1] > 0
+
+
+def test_overlapping_hue_bands_pick_the_best_fit_not_the_first_entry():
+    """Regression: catalog order decided the answer when two bands overlap.
+
+    This blue patch reads at hue 107: 3 from the narrow band's centre and 8
+    from the wide one's, so the narrow band wins whichever order they appear in.
+    """
+    wide = SkuEntry("SKU-WIDE", "Wide band", hue=(90, 140))         # centre 115
+    narrow = SkuEntry("SKU-NARROW", "Narrow band", hue=(105, 115))  # centre 110
+
+    for order in ([wide, narrow], [narrow, wide]):
+        item = identify_one((200, 110, 40), catalog=Catalog(list(order)))
+        assert item.sku == "SKU-NARROW", f"order {[e.sku for e in order]} changed the answer"

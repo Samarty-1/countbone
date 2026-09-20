@@ -6,7 +6,7 @@ import textwrap
 
 import pytest
 
-from countbone.catalog import Catalog
+from countbone.catalog import Catalog, SkuEntry
 from countbone.config import Config
 
 
@@ -100,3 +100,45 @@ def test_catalog_hue_band_wraps_through_red():
 def test_catalog_confidence_peaks_at_the_band_centre():
     entry = Catalog.default().by_sku("SKU-BLU")  # hue 95-130, centre 112.5
     assert entry.hue_center_distance(112) < entry.hue_center_distance(128)
+
+
+def test_a_misspelled_section_is_rejected(tmp_path):
+    """Regression: an unknown section used to be dropped, so a config that
+    looked applied silently ran on defaults."""
+    with pytest.raises(ValueError, match="unknown config section"):
+        Config.load(write(tmp_path, """
+            capturee:
+              every_n_frames: 2
+        """))
+
+
+def test_a_misspelled_option_names_its_section(tmp_path):
+    with pytest.raises(ValueError, match="bad option in config section 'count'"):
+        Config.load(write(tmp_path, """
+            count:
+              min_hitz: 4
+        """))
+
+
+def test_shorthand_does_not_leak_enabled_into_options(tmp_path):
+    cfg = Config.load(write(tmp_path, """
+        plugins:
+          - confidence: { enabled: true, sku_threshold: 0.9 }
+    """))
+    assert cfg.plugins[0].enabled is True
+    assert cfg.plugins[0].options == {"sku_threshold": 0.9}
+
+
+def test_hue_distance_measures_the_short_way_round_the_wheel():
+    red = Catalog.default().by_sku("SKU-RED")   # hue 170-10, centre 0
+    assert red.hue_distance(2) == pytest.approx(2)
+    assert red.hue_distance(178) == pytest.approx(2)   # wraps, not 178 apart
+
+
+def test_the_two_hue_distances_answer_different_questions():
+    """Absolute distance picks the SKU; normalised distance scores confidence."""
+    wide = SkuEntry("W", "wide", hue=(90, 140))
+    narrow = SkuEntry("N", "narrow", hue=(105, 115))
+
+    assert narrow.hue_distance(107) < wide.hue_distance(107)              # closer centre
+    assert narrow.hue_center_distance(107) > wide.hue_center_distance(107)  # nearer its edge

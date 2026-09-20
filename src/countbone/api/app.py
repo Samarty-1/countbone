@@ -10,6 +10,7 @@ import logging
 import shutil
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -63,12 +64,22 @@ def create_app(config: Config | None = None, store: Store | None = None) -> Fast
     db = store or Store(cfg.output.sqlite or "countbone.db")
     tracker = RunTracker()
     # One worker: counting is CPU-bound, and a queue is easier to reason about
-    # than contention between two runs writing artifacts at once.
+    # than contention between two runs writing artifacts at once. One worker
+    # also means the single Pipeline below is never entered concurrently.
     pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="countbone")
+    # Built once: a Pipeline holds no per-run state, and rebuilding it per
+    # request would reload the detector's weights every time.
+    pipeline = Pipeline(cfg, store=db)
     uploads = Path(cfg.output.dir) / "_uploads"
     uploads.mkdir(parents=True, exist_ok=True)
 
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        yield
+        pool.shutdown(wait=False, cancel_futures=True)
+
     app = FastAPI(
+        lifespan=lifespan,
         title="countbone",
         version="0.1.0",
         description="Video in, counts out. Everything else is a plugin.",
@@ -84,7 +95,7 @@ def create_app(config: Config | None = None, store: Store | None = None) -> Fast
         def work() -> None:
             tracker.set(run_id, status="running")
             try:
-                result = Pipeline(cfg, store=db).run(source, run_id=run_id)
+                result = pipeline.run(source, run_id=run_id)
                 tracker.set(
                     run_id,
                     status="done",
@@ -106,7 +117,7 @@ def create_app(config: Config | None = None, store: Store | None = None) -> Fast
             "detect": cfg.detect.backend,
             "identify": cfg.identify.backend,
             "count": cfg.count.strategy,
-            "plugins": [p.name for p in plugin_base.build(cfg.plugins)],
+            "plugins": [p.name for p in pipeline.plugins],
         }
 
     @app.get("/api/plugins")
@@ -156,7 +167,9 @@ def create_app(config: Config | None = None, store: Store | None = None) -> Fast
     def artifact(run_id: str, path: str) -> FileResponse:
         root = (Path(cfg.output.dir) / run_id).resolve()
         target = (root / path).resolve()
-        if not str(target).startswith(str(root)) or not target.is_file():
+        # is_relative_to, not startswith: "runs/run_1" is a string prefix of
+        # "runs/run_10", so a prefix check would let one run read another's.
+        if not target.is_relative_to(root) or not target.is_file():
             raise HTTPException(404, "artifact not found")
         return FileResponse(target)
 

@@ -49,6 +49,12 @@ class ConfidenceScoring(Plugin):
 
     # -- per item --------------------------------------------------------
     def on_items(self, ctx: RunContext, frame: Frame, items: list[Item]) -> list[Item]:
+        """Score each sighting from what is knowable within this frame.
+
+        Cross-frame signals (identity flicker, persistence) deliberately do
+        not appear here: they are not known until every frame has been read,
+        and they are folded in at track level by count._track_confidence.
+        """
         quality = self._frame_quality(frame)
         for item in items:
             score = (
@@ -56,8 +62,6 @@ class ConfidenceScoring(Plugin):
                 + self.w_identify * item.id_confidence
                 + self.w_quality * quality
             )
-            if item.meta.get("identity_flicker"):
-                score *= 0.8
             item.confidence = float(np.clip(score, 0.0, 1.0))
             item.meta["low_confidence"] = item.confidence < self.item_threshold
         return items

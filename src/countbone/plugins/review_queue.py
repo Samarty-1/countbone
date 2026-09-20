@@ -36,6 +36,9 @@ class ReviewQueue(Plugin):
         self.sku_threshold = float(sku_threshold)
         self.item_threshold = float(item_threshold)
         self.max_items = int(max_items)
+        # Headroom above max_items, so trimming is occasional rather than
+        # every frame, while the buffer stays bounded.
+        self.candidate_cap = max(self.max_items * 2, self.max_items + 20)
         self.save_crops = bool(save_crops)
         self.review_unknown = bool(review_unknown)
 
@@ -47,7 +50,7 @@ class ReviewQueue(Plugin):
         """
         pending: list[dict[str, Any]] = ctx.setdefault("review_candidates", list)
         unknown_sku = ctx.config.identify.unknown_sku
-        for item in items:
+        for index, item in enumerate(items):
             is_unknown = self.review_unknown and item.sku == unknown_sku
             if item.confidence >= self.item_threshold and not is_unknown:
                 continue
@@ -57,12 +60,27 @@ class ReviewQueue(Plugin):
                     "reason": "unidentified" if is_unknown else "low_item_confidence",
                     "confidence": item.confidence,
                     "frame_index": frame.index,
+                    "index_in_frame": index,
                     "bbox": item.detection.bbox,
                     "crop": self._crop(frame, item) if self.save_crops else None,
                     "meta": {"id_source": item.id_source, **item.meta},
                 }
             )
+        self._trim(pending)
         return items
+
+    def _trim(self, pending: list[dict[str, Any]]) -> None:
+        """Keep only the least confident candidates.
+
+        Every candidate holds a decoded crop, so on a long run with poor
+        footage an untrimmed list is unbounded memory. Only `max_items` can
+        ever be raised, so holding a small multiple of that is enough to keep
+        the eventual selection identical.
+        """
+        if len(pending) <= self.candidate_cap:
+            return
+        pending.sort(key=lambda c: c["confidence"])
+        del pending[self.max_items :]
 
     def on_counts(self, ctx: RunContext, result: CountResult) -> CountResult:
         candidates = sorted(
@@ -133,7 +151,13 @@ class ReviewQueue(Plugin):
             return None
         crops_dir = ctx.artifacts_dir / "crops"
         crops_dir.mkdir(parents=True, exist_ok=True)
-        name = f"f{cand['frame_index']:05d}_{cand['sku']}_{int(cand['confidence'] * 100):03d}.jpg"
+        # The index within the frame is part of the name: without it, two
+        # identical cartons in one frame overwrite each other's crop and a
+        # reviewer is shown evidence belonging to a different item.
+        name = (
+            f"f{cand['frame_index']:05d}_{cand['index_in_frame']:02d}"
+            f"_{cand['sku']}_{int(cand['confidence'] * 100):03d}.jpg"
+        )
         path = crops_dir / name
         cv2.imwrite(str(path), image)
         return str(path.relative_to(ctx.artifacts_dir))

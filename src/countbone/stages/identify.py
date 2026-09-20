@@ -55,20 +55,27 @@ class ColorIdentifier:
             val = float(np.median(hsv[:, :, 2]))
 
             sku, label, conf = self.cfg.unknown_sku, "Unidentified", 0.0
-            for entry in self.catalog.entries:
-                if entry.achromatic:
-                    if sat < entry.min_saturation:
+
+            # Best fit, not first match: overlapping hue bands in a catalog
+            # should not be resolved by the order someone typed them in.
+            chromatic = [
+                e
+                for e in self.catalog.entries
+                if not e.achromatic and sat >= e.min_saturation and e.matches_hue(hue)
+            ]
+            if chromatic:
+                entry = min(chromatic, key=lambda e: e.hue_distance(hue))
+                sku, label = entry.sku, entry.label
+                # centre of the hue band and strong saturation both help
+                centred = 1.0 - entry.hue_center_distance(hue)
+                sat_term = min(1.0, sat / 180.0)
+                conf = float(np.clip(0.35 + 0.45 * centred + 0.20 * sat_term, 0.0, 1.0))
+            else:
+                for entry in self.catalog.entries:
+                    if entry.achromatic and sat < entry.min_saturation:
                         sku, label = entry.sku, entry.label
                         conf = float(np.clip(1.0 - sat / max(entry.min_saturation, 1), 0, 1))
                         break
-                    continue
-                if sat >= entry.min_saturation and entry.matches_hue(hue):
-                    sku, label = entry.sku, entry.label
-                    # centre of the hue band and strong saturation both help
-                    centred = 1.0 - entry.hue_center_distance(hue)
-                    sat_term = min(1.0, sat / 180.0)
-                    conf = float(np.clip(0.35 + 0.45 * centred + 0.20 * sat_term, 0.0, 1.0))
-                    break
 
             items.append(
                 Item(

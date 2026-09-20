@@ -84,6 +84,9 @@ class Pipeline:
         )
         camera = motion.MotionEstimator()
         per_frame: dict[int, list[Item]] = defaultdict(list)
+        # Only the frame-tally strategies need every sighting kept; tracking
+        # does not, and on a long run that is a lot of objects held for nothing.
+        needs_per_frame = cfg.count.strategy in ("peak_frame", "median_frame")
 
         for frame in capture.frames(source, cfg.capture):          # 1. Capture
             result.frames_read += 1
@@ -114,9 +117,9 @@ class Pipeline:
                 self.plugins, "on_items", ctx, frame, items, transform=True
             )
 
-            per_frame[frame.index] = items
+            if needs_per_frame:
+                per_frame[frame.index] = items
             tracker.update(frame.index, items, frame.meta.get("motion"))  # 5. Count
-            self._remember_frame(ctx, frame, items)
 
         tracks = plugin_base.fire(
             self.plugins, "on_tracks", ctx, tracker.tracks, transform=True
@@ -139,22 +142,6 @@ class Pipeline:
         # should become visible to readers only once all of it exists.
         written.update(output.persist(ctx, result))
         return result
-
-    # -- shared state for plugins ----------------------------------------
-    @staticmethod
-    def _remember_frame(ctx: RunContext, frame, items: list[Item]) -> None:
-        """Keep the last frame image per index so output plugins can cut crops.
-
-        Only a bounded window is held: crops are cheap, whole decoded frames
-        are not, and a long run must not grow without limit.
-        """
-        cache: dict = ctx.setdefault("frame_cache", dict)
-        if items:
-            cache[frame.index] = frame
-        limit = 60
-        if len(cache) > limit:
-            for stale in sorted(cache)[: len(cache) - limit]:
-                cache.pop(stale, None)
 
 
 def run_video(

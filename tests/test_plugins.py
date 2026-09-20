@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -169,3 +171,43 @@ def test_tolerance_ignores_skus_with_no_expected_count():
     out = ToleranceRules().on_counts(ctx, result)
     assert "tolerance" not in out.counts[0].evidence
     assert not out.needs_review
+
+
+# -- output layer ----------------------------------------------------------
+def test_every_review_item_gets_its_own_crop(demo_scene, config):
+    """Regression: identical cartons in one frame overwrote each other's crop,
+    so a reviewer was shown evidence belonging to a different item."""
+    result = Pipeline(config).run(demo_scene.path)
+    crops = [r.crop_path for r in result.reviews if r.crop_path]
+
+    assert crops, "the demo should raise at least one item-level review"
+    assert len(crops) == len(set(crops))
+    run_dir = Path(config.output.dir) / result.run_id
+    assert all((run_dir / c).is_file() for c in crops)
+
+
+def test_review_candidates_are_trimmed_as_they_accumulate():
+    """Every candidate holds a decoded crop, so the buffer must stay bounded."""
+    from countbone.plugins.review_queue import ReviewQueue
+    from countbone.types import Detection, Frame, Item
+
+    queue = ReviewQueue(max_items=5, save_crops=False, item_threshold=1.0)
+    ctx = RunContext(config=Config(), source="x")
+    image = np.zeros((40, 40, 3), dtype=np.uint8)
+
+    for f in range(60):
+        frame = Frame(index=f, source_index=f, timestamp_s=0.0, image=image)
+        items = [
+            Item(
+                detection=Detection((0, 0, 10, 10), score=0.1, frame_index=f),
+                sku="SKU-A",
+                id_confidence=0.1,
+                confidence=(f % 10) / 10,
+            )
+        ]
+        queue.on_items(ctx, frame, items)
+
+    pending = ctx.state["review_candidates"]
+    assert len(pending) <= queue.candidate_cap
+    # the least confident sightings must survive the trimming
+    assert min(c["confidence"] for c in pending) == 0.0

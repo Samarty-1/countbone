@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import pytest
 
@@ -109,6 +110,17 @@ def test_unknown_review_is_a_404(client):
 def test_artifacts_cannot_escape_the_run_directory(client):
     res = client.get("/api/runs/run_api/artifacts/../../../etc/passwd")
     assert res.status_code == 404
+
+
+def test_one_run_cannot_read_another_runs_artifacts(client, config):
+    """Regression: a string-prefix guard let run_1 reach into run_10."""
+    root = Path(config.output.dir)
+    (root / "run_1").mkdir(parents=True, exist_ok=True)
+    (root / "run_10").mkdir(parents=True, exist_ok=True)
+    (root / "run_10" / "secret.txt").write_text("other run", encoding="utf-8")
+
+    assert client.get("/api/runs/run_1/artifacts/../run_10/secret.txt").status_code == 404
+    assert client.get("/api/runs/run_10/artifacts/secret.txt").status_code == 200
 
 
 def test_dashboard_is_served(client):

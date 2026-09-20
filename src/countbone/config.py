@@ -102,14 +102,29 @@ class Config:
     def from_dict(cls, raw: dict[str, Any]) -> Config:
         raw = dict(raw or {})
         plugins_raw = raw.pop("plugins", None)
-        cfg = cls(
-            capture=CaptureConfig(**raw.get("capture", {})),
-            preprocess=PreprocessConfig(**raw.get("preprocess", {})),
-            detect=DetectConfig(**raw.get("detect", {})),
-            identify=IdentifyConfig(**raw.get("identify", {})),
-            count=CountConfig(**raw.get("count", {})),
-            output=OutputConfig(**raw.get("output", {})),
-        )
+        sections = {
+            "capture": CaptureConfig,
+            "preprocess": PreprocessConfig,
+            "detect": DetectConfig,
+            "identify": IdentifyConfig,
+            "count": CountConfig,
+            "output": OutputConfig,
+        }
+        # A misspelled section used to be dropped in silence, so a config that
+        # looked applied ran on defaults instead.
+        unknown = set(raw) - set(sections)
+        if unknown:
+            raise ValueError(
+                f"unknown config section(s): {', '.join(sorted(unknown))}; "
+                f"expected any of {', '.join(sections)}, plugins"
+            )
+        built = {}
+        for key, section_cls in sections.items():
+            try:
+                built[key] = section_cls(**(raw.get(key) or {}))
+            except TypeError as exc:
+                raise ValueError(f"bad option in config section {key!r}: {exc}") from None
+        cfg = cls(**built)
         if plugins_raw is not None:
             cfg.plugins = [_plugin_spec(p) for p in plugins_raw]
         return cfg
@@ -147,6 +162,7 @@ def _plugin_spec(entry: Any) -> PluginSpec:
             )
         # shorthand: {plugin_name: {opt: val}}
         (name, options), = entry.items()
-        options = options or {}
-        return PluginSpec(name=name, options=dict(options), enabled=options.pop("enabled", True))
+        options = dict(options or {})
+        enabled = options.pop("enabled", True)
+        return PluginSpec(name=name, options=options, enabled=enabled)
     raise ValueError(f"cannot read plugin spec from {entry!r}")

@@ -32,6 +32,22 @@ class SkuEntry:
             return lo <= hue <= hi
         return hue >= lo or hue <= hi  # wraps through 0 (red)
 
+    def hue_center(self) -> float | None:
+        if self.hue is None:
+            return None
+        lo, hi = self.hue
+        span = (hi - lo) if lo <= hi else (180 - lo + hi)
+        return (lo + span / 2) % 180
+
+    def hue_distance(self, hue: float) -> float:
+        """Absolute distance to the band centre, in hue degrees, the short way
+        around the colour wheel. Used to choose between overlapping bands."""
+        centre = self.hue_center()
+        if centre is None:
+            return float("inf")
+        d = abs(hue - centre) % 180
+        return min(d, 180 - d)
+
     def hue_center_distance(self, hue: float) -> float:
         """0.0 dead centre of the band, 1.0 at its edge. Drives confidence."""
         if self.hue is None:
