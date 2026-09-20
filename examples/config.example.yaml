@@ -1,0 +1,63 @@
+# Every knob the backbone has, with the defaults spelled out.
+# Copy, edit, and pass with:  countbone run shelf.mp4 -c my-config.yaml
+
+capture:
+  every_n_frames: 5      # sample 1 frame in 5; lower = better tracking, slower
+  max_frames: 400        # hard cap per run
+  start_s: 0.0
+  end_s: null
+  resize_width: 960      # null keeps native resolution
+
+preprocess:
+  denoise: false
+  clahe: true            # local contrast; helps in poor warehouse light
+  grayscale_stats: true  # required by quality_gate and confidence
+
+detect:
+  backend: contour       # contour | yolo | fixture
+  min_score: 0.25
+  min_area_frac: 0.0008  # reject specks
+  max_area_frac: 0.25    # reject the shelf itself
+  nms_iou: 0.45
+  model_path: null       # e.g. weights/stock-yolov8n.pt for backend: yolo
+  device: cpu
+
+identify:
+  backend: color         # color | classmap | fixture
+  catalog: examples/catalog.example.yaml
+  unknown_sku: UNKNOWN
+
+count:
+  strategy: tracking     # tracking | peak_frame | median_frame
+  track_iou: 0.3
+  track_max_gap: 2
+  min_hits: 2
+  expected:              # optional book stock, drives variance and tolerance
+    SKU-RED: 10
+    SKU-BLU: 11
+
+output:
+  dir: runs
+  json: true
+  csv: true
+  sqlite: countbone.db
+  save_crops: true
+
+plugins:
+  - quality_gate
+  - multiframe
+  - name: confidence
+    options:
+      sku_threshold: 0.60
+      run_threshold: 0.65
+  - name: tolerance
+    options:
+      bands:
+        - { max_unit_value: 10.0, abs: 2, pct: 0.03 }
+        - { max_unit_value: 100.0, abs: 1, pct: 0.01 }
+        - { max_unit_value: null, abs: 0, pct: 0.0 }
+  - name: review_queue
+    options:
+      max_items: 40
+  - exception_report
+  - audit_pack

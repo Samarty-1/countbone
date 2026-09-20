@@ -1,0 +1,25 @@
+# The closed set of things the system is allowed to recognise.
+# hue is an OpenCV range (0-179) and may wrap past 179 back through 0.
+skus:
+  - sku: SKU-RED
+    label: Red carton
+    hue: [170, 10]
+    unit_value: 4.50
+    expected: 10
+  - sku: SKU-YEL
+    label: Yellow carton
+    hue: [20, 35]
+    unit_value: 3.20
+  - sku: SKU-GRN
+    label: Green carton
+    hue: [45, 85]
+    unit_value: 6.80
+  - sku: SKU-BLU
+    label: Blue carton
+    hue: [95, 130]
+    unit_value: 5.10
+  - sku: SKU-GREY
+    label: Unpainted tin
+    achromatic: true
+    min_saturation: 40
+    unit_value: 120.00

@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "countbone"
+version = "0.1.0"
+description = "A video-to-count pipeline for stock counting. The backbone is the product; everything else is a plugin."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+keywords = ["inventory", "stock count", "computer vision", "pipeline", "audit"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Image Recognition",
+]
+dependencies = [
+  "numpy>=1.24",
+  "opencv-python-headless>=4.8",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+api = ["fastapi>=0.110", "uvicorn>=0.27", "pydantic>=2.5", "python-multipart>=0.0.9"]
+yolo = ["ultralytics>=8.1"]
+dev = ["pytest>=7.4", "pytest-cov>=4.1", "httpx>=0.26", "ruff>=0.4"]
+
+[project.scripts]
+countbone = "countbone.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Samarty-1/countbone"
+Issues = "https://github.com/Samarty-1/countbone/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+countbone = ["api/static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4"]
+ignore = ["E501"]

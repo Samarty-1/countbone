@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# run artifacts and local data
+runs/
+*.db
+*.db-wal
+*.db-shm
+examples/*.mp4
+examples/*.avi
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
