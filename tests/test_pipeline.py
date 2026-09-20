@@ -73,6 +73,22 @@ def test_run_is_recorded_in_the_store(demo_scene, config):
     assert stored["config_fingerprint"] == config.fingerprint()
 
 
+def test_a_stored_run_already_carries_its_audit_trail(demo_scene, config):
+    """Regression: a run must not become readable before its outputs exist.
+
+    The store row used to be written inside the output stage, so a reader
+    could see a finished run whose exception report and audit pack had not
+    been produced yet.
+    """
+    pipeline = Pipeline(config)
+    result = pipeline.run(demo_scene.path)
+
+    stored = pipeline.store.get_run(result.run_id)
+    assert stored["meta"]["audit"]["manifest_sha256"]
+    kinds = {a["kind"] for a in pipeline.store.audit_trail(result.run_id)}
+    assert {"exception_report", "audit_pack"} <= kinds
+
+
 def test_same_config_gives_the_same_answer(demo_scene, config):
     first = Pipeline(config).run(demo_scene.path)
     second = Pipeline(config).run(demo_scene.path)

@@ -187,7 +187,7 @@ Each phase adds plugins. The backbone does not change. See [docs/ROADMAP.md](doc
 
 ```bash
 pip install -e ".[api,dev]"
-pytest              # 95 tests
+pytest              # 96 tests
 ruff check .
 ```
 

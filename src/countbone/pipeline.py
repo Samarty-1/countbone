@@ -135,6 +135,9 @@ class Pipeline:
         written = output.emit(ctx, result, cfg.output)               # 6. Output
         result.meta["outputs"] = written
         plugin_base.fire(self.plugins, "on_output", ctx, result)
+        # Persist last: output plugins add artifacts and metadata, and a run
+        # should become visible to readers only once all of it exists.
+        written.update(output.persist(ctx, result))
         return result
 
     # -- shared state for plugins ----------------------------------------

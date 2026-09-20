@@ -47,13 +47,24 @@ def write_csv(ctx: RunContext, result: CountResult) -> Path:
 
 
 def emit(ctx: RunContext, result: CountResult, cfg: OutputConfig) -> dict[str, str]:
+    """Write the file artifacts. Persistence is a separate, later step."""
     written: dict[str, str] = {}
     if cfg.json:
         written["json"] = str(write_json(ctx, result))
     if cfg.csv:
         written["csv"] = str(write_csv(ctx, result))
-    if ctx.store is not None:
-        ctx.store.save_run(result, config_fingerprint=ctx.config.fingerprint())
-        written["sqlite"] = ctx.store.path
-    log.info("run %s wrote %s", result.run_id, ", ".join(written) or "nothing")
     return written
+
+
+def persist(ctx: RunContext, result: CountResult) -> dict[str, str]:
+    """Commit the run to the store.
+
+    This happens after every output-layer plugin has run, so a run is never
+    readable in a half-finished state: by the time the row exists, its
+    exception report and audit pack exist too.
+    """
+    if ctx.store is None:
+        return {}
+    ctx.store.save_run(result, config_fingerprint=ctx.config.fingerprint())
+    log.info("run %s committed to %s", result.run_id, ctx.store.path)
+    return {"sqlite": ctx.store.path}
