@@ -1,4 +1,4 @@
-__pycache__/
+﻿__pycache__/
 *.py[cod]
 *.egg-info/
 build/
@@ -17,9 +17,15 @@ runs/
 *.db-shm
 examples/*.mp4
 examples/*.avi
+examples/*.webm
 
 # editors / OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+
+# dashboard build tooling (the built output in src/countbone/api/static is committed)
+web/node_modules/
+web/*.tsbuildinfo
+web/tsconfig.tsbuildinfo

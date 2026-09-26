@@ -47,6 +47,21 @@ def probe(source: str | int) -> dict:
         cap.release()
 
 
+def _timestamp(cap: cv2.VideoCapture, source_index: int, fps: float) -> float:
+    """When the frame just read is shown, in seconds from the start.
+
+    Phones record variable frame rate, so index / average-fps drifts: on a
+    VFR clip it was measured over a second out, which puts the frame
+    inspector's boxes on the wrong carton. The container's own timestamp is
+    right for both constant and variable rate. Some backends (cameras) report
+    0 for every frame; then the old estimate is all there is.
+    """
+    pos = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+    if pos > 0 or source_index == 0:
+        return pos
+    return source_index / fps if fps > 0 else float(source_index)
+
+
 def frames(source: str | int, cfg: CaptureConfig) -> Iterator[Frame]:
     """Yield sampled, optionally downscaled frames.
 
@@ -65,7 +80,7 @@ def frames(source: str | int, cfg: CaptureConfig) -> Iterator[Frame]:
             if not ok:
                 break
             source_index += 1
-            ts = source_index / fps if fps > 0 else float(source_index)
+            ts = _timestamp(cap, source_index, fps)
             if ts < cfg.start_s:
                 continue
             if cfg.end_s is not None and ts > cfg.end_s:

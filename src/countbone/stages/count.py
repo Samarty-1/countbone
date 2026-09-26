@@ -56,8 +56,7 @@ class Tracker:
         forward by that displacement is what keeps one physical carton as one
         track instead of one per frame.
         """
-        if motion and motion.get("estimated"):
-            self._cum = (self._cum[0] + motion["dx"], self._cum[1] + motion["dy"])
+        self.observe_motion(motion)
 
         live = [
             t for t in self.tracks if frame_index - t.last_frame <= self.max_gap + 1
@@ -104,6 +103,17 @@ class Tracker:
             self._next_id += 1
             self.tracks.append(track)
             self._attach(track, item, frame_index)
+
+    def observe_motion(self, motion: dict[str, float] | None) -> None:
+        """Add one frame's camera displacement to the running total.
+
+        Called for every frame, including ones the quality gate drops: the
+        camera moved during a dropped frame too. Skip that, and every track's
+        prediction lags by a whole frame of pan, which at walking speed is
+        enough to split each object in view into two tracks and count it twice.
+        """
+        if motion and motion.get("estimated"):
+            self._cum = (self._cum[0] + motion["dx"], self._cum[1] + motion["dy"])
 
     def _predict(
         self, track: Track, frame_index: int, motion: dict[str, float] | None

@@ -36,3 +36,22 @@ jobs:
 
       - name: Test
         run: pytest -q --cov=countbone --cov-report=term-missing
+
+  dashboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      - name: Typecheck and build
+        run: npm run build

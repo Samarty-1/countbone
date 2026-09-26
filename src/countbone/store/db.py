@@ -185,19 +185,58 @@ class Store:
             self._conn.commit()
 
     def resolve_review(
-        self, review_id: str, status: str, resolved_sku: str | None, resolved_by: str
+        self,
+        review_id: str,
+        status: str,
+        resolved_sku: str | None,
+        resolved_by: str,
+        resolved_count: int | None = None,
     ) -> bool:
+        """Record a reviewer's decision.
+
+        A recount goes into the review's meta rather than over the run's
+        count: the machine's answer and the human's correction are both
+        evidence, and the audit trail needs to show which was which.
+        """
         if status not in {"accepted", "rejected", "corrected", "pending"}:
             raise ValueError(f"invalid review status {status!r}")
+        now = time.time()
         with self._lock:
-            cur = self._conn.execute(
+            row = self._conn.execute(
+                "SELECT run_id, sku, meta FROM reviews WHERE review_id = ?", (review_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            meta = json.loads(row["meta"] or "{}")
+            if resolved_count is not None:
+                meta["resolved_count"] = int(resolved_count)
+            else:
+                meta.pop("resolved_count", None)
+            self._conn.execute(
                 """UPDATE reviews
-                      SET status = ?, resolved_sku = ?, resolved_by = ?, resolved_at = ?
+                      SET status = ?, resolved_sku = ?, resolved_by = ?, resolved_at = ?,
+                          meta = ?
                     WHERE review_id = ?""",
-                (status, resolved_sku, resolved_by, time.time(), review_id),
+                (status, resolved_sku, resolved_by, now, _json(meta), review_id),
+            )
+            self._conn.execute(
+                "INSERT INTO audit (run_id, kind, payload, created_at) VALUES (?,?,?,?)",
+                (
+                    row["run_id"],
+                    "review_decision",
+                    _json({
+                        "review_id": review_id,
+                        "sku": row["sku"],
+                        "status": status,
+                        "resolved_sku": resolved_sku,
+                        "resolved_count": resolved_count,
+                        "resolved_by": resolved_by,
+                    }),
+                    now,
+                ),
             )
             self._conn.commit()
-            return cur.rowcount > 0
+            return True
 
     # -- reads -----------------------------------------------------------
     def _rows(self, sql: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:

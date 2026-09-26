@@ -7,7 +7,10 @@ pipeline can be scored, not just executed.
 
 from __future__ import annotations
 
+import contextlib
+import os
 import random
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -117,17 +120,55 @@ def make_demo_video(
     )
 
 
+@contextlib.contextmanager
+def _native_stderr_silenced():
+    """Point file descriptor 2 at the null device for the duration.
+
+    Python-level redirection cannot catch output written by C libraries, so
+    this swaps the descriptor itself, and always restores it.
+    """
+    try:
+        sys.stderr.flush()
+        saved = os.dup(2)
+    except (OSError, ValueError):  # no real stderr (e.g. some IDE consoles)
+        yield
+        return
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull, 2)
+        yield
+    finally:
+        os.dup2(saved, 2)
+        os.close(saved)
+        os.close(devnull)
+
+
 def _open_writer(path: Path, fps: int, w: int, h: int):
-    """mp4 where the codec exists, AVI where it does not. Never fail silently."""
-    attempts = [(path.with_suffix(".mp4"), "mp4v"), (path.with_suffix(".avi"), "MJPG")]
+    """A format a browser can play if this OpenCV build can write one.
+
+    The dashboard's frame inspector plays the source video, and no browser
+    plays OpenCV's usual mp4v. VP8 WebM is written by the pip wheels and
+    played by every current browser. (H.264 would be nicer, but the wheels
+    ship no encoder and probing for one prints codec errors on every run.)
+    mp4v and MJPG remain as last resorts. Never fail silently.
+    """
+    attempts = [
+        (path.with_suffix(".webm"), "VP80"),
+        (path.with_suffix(".mp4"), "mp4v"),
+        (path.with_suffix(".avi"), "MJPG"),
+    ]
     for candidate, fourcc in attempts:
-        writer = cv2.VideoWriter(
-            str(candidate), cv2.VideoWriter_fourcc(*fourcc), fps, (w, h)
-        )
+        # FFmpeg prints a harmless "tag VP80 is not supported ... webm" notice
+        # from native code while it picks the right tag itself; keep it off
+        # the user's terminal. Failures still surface through isOpened().
+        with _native_stderr_silenced():
+            writer = cv2.VideoWriter(
+                str(candidate), cv2.VideoWriter_fourcc(*fourcc), fps, (w, h)
+            )
         if writer.isOpened():
             return writer, candidate
         writer.release()
     raise RuntimeError(
-        "OpenCV could not open any video writer (tried mp4v and MJPG); "
+        "OpenCV could not open any video writer (tried VP80, mp4v and MJPG); "
         "install a build of opencv with video support"
     )

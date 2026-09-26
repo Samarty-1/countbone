@@ -177,6 +177,11 @@ def test_tolerance_ignores_skus_with_no_expected_count():
 def test_every_review_item_gets_its_own_crop(demo_scene, config):
     """Regression: identical cartons in one frame overwrote each other's crop,
     so a reviewer was shown evidence belonging to a different item."""
+    # Review every sighting: the demo is now clean enough to raise none by
+    # itself, and this test is about crops, not about what gets flagged.
+    for spec in config.plugins:
+        if spec.name == "review_queue":
+            spec.options = {**(spec.options or {}), "item_threshold": 1.01}
     result = Pipeline(config).run(demo_scene.path)
     crops = [r.crop_path for r in result.reviews if r.crop_path]
 

@@ -77,10 +77,24 @@ def _print_result(result: CountResult, truth: dict[str, int] | None = None) -> N
         print("\nwrote: " + ", ".join(f"{k} -> {v}" for k, v in outputs.items()))
 
 
+def _pipeline(cfg: Config) -> Pipeline:
+    """A pipeline that also writes inspector.json, like one run from the API.
+
+    Without it, a video counted from the CLI appears in the dashboard (same
+    database) but can never be opened in its frame inspector. There is no one
+    to report live progress to here, so progress goes nowhere.
+    """
+    from .api import telemetry  # no web dependencies: safe without the [api] extra
+
+    pipeline = Pipeline(cfg)
+    pipeline.plugins = telemetry.attach(pipeline.plugins, lambda *_, **__: None)
+    return pipeline
+
+
 # -- commands -------------------------------------------------------------
 def cmd_run(args: argparse.Namespace) -> int:
     cfg = _load_config(args)
-    result = Pipeline(cfg).run(args.video)
+    result = _pipeline(cfg).run(args.video)
     if args.json:
         print(json.dumps(result.to_dict(), indent=2))
     else:
@@ -95,7 +109,7 @@ def cmd_demo(args: argparse.Namespace) -> int:
     scene = make_demo_video(args.video or "examples/demo_shelf.mp4", seed=args.seed)
     print(f"synthetic shelf: {scene.path}  ({scene.total} units, {scene.frames} frames)")
     cfg.count.expected = dict(scene.truth)
-    result = Pipeline(cfg).run(scene.path)
+    result = _pipeline(cfg).run(scene.path)
     _print_result(result, truth=scene.truth)
     error = abs(result.total - scene.total)
     print(f"\nabsolute count error: {error} of {scene.total} "

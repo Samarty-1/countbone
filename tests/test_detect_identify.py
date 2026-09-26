@@ -62,6 +62,27 @@ def test_contour_detector_finds_separated_boxes():
     assert all(d.score > 0.5 for d in dets)
 
 
+def test_a_box_cut_by_the_frame_edge_does_not_leak_its_label():
+    """Regression: a carton cut off by the frame edge has an open outline, so
+    its white label was reported as an object of its own (an UNKNOWN count and
+    a review item). The partial carton is skipped; the label must be too."""
+    image = np.full((480, 640, 3), 170, dtype=np.uint8)
+    # whole carton with a label, for contrast
+    cv2.rectangle(image, (100, 120), (200, 300), (40, 40, 205), -1)
+    cv2.rectangle(image, (100, 120), (200, 300), (30, 30, 30), 3)
+    cv2.rectangle(image, (116, 150), (184, 180), (235, 235, 235), -1)
+    # carton running off the right edge, label fully inside the frame
+    cv2.rectangle(image, (560, 120), (700, 300), (40, 40, 205), -1)
+    cv2.rectangle(image, (560, 120), (700, 300), (30, 30, 30), 3)
+    cv2.rectangle(image, (576, 150), (630, 180), (235, 235, 235), -1)
+    frame = Frame(index=0, source_index=0, timestamp_s=0.0, image=image)
+
+    dets = detect.build(DetectConfig()).detect(frame)
+    assert len(dets) == 1  # only the whole carton: no partial, no label
+    x1, y1, x2, y2 = dets[0].bbox
+    assert x1 <= 100 and y1 <= 120 and x2 >= 200 and y2 >= 300 and x2 < 260
+
+
 def test_unknown_detector_backend_fails_loudly():
     with pytest.raises(ValueError, match="unknown detect backend"):
         detect.build(DetectConfig(backend="magic"))

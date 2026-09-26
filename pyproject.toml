@@ -29,7 +29,8 @@ dependencies = [
 [project.optional-dependencies]
 api = ["fastapi>=0.110", "uvicorn>=0.27", "pydantic>=2.5", "python-multipart>=0.0.9"]
 yolo = ["ultralytics>=8.1"]
-dev = ["pytest>=7.4", "pytest-cov>=4.1", "httpx>=0.26", "ruff>=0.4"]
+# imageio-ffmpeg: a bundled ffmpeg, so the variable-frame-rate test can build its clip.
+dev = ["pytest>=7.4", "pytest-cov>=4.1", "httpx>=0.26", "ruff>=0.4", "imageio-ffmpeg>=0.5"]
 
 [project.scripts]
 countbone = "countbone.cli:main"
@@ -42,7 +43,8 @@ Issues = "https://github.com/Samarty-1/countbone/issues"
 where = ["src"]
 
 [tool.setuptools.package-data]
-countbone = ["api/static/*"]
+# The dashboard is built from web/ into api/static (see web/README.md).
+countbone = ["api/static/*", "api/static/assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
