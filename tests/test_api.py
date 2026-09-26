@@ -269,6 +269,19 @@ def test_a_recount_is_kept_beside_the_machine_count(client):
     assert bad.status_code == 422
 
 
+def test_cors_is_off_unless_origins_are_named(client, config, tmp_path):
+    origin = {"Origin": "http://localhost:8081"}
+    assert "access-control-allow-origin" not in client.get("/api/health", headers=origin).headers
+
+    store = Store(tmp_path / "cors.db")
+    with TestClient(create_app(config, store=store, allow_origins=["http://localhost:8081"])) as c:
+        allowed = c.get("/api/health", headers=origin).headers
+        other = c.get("/api/health", headers={"Origin": "http://evil.example"}).headers
+    store.close()
+    assert allowed["access-control-allow-origin"] == "http://localhost:8081"
+    assert "access-control-allow-origin" not in other
+
+
 def test_dashboard_is_served(client):
     res = client.get("/")
     assert res.status_code == 200

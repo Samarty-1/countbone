@@ -11,6 +11,7 @@ import logging
 import re
 import shutil
 import threading
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -102,7 +103,11 @@ class RunTracker:
             return [dict(v) for v in self._state.values()]
 
 
-def create_app(config: Config | None = None, store: Store | None = None) -> FastAPI:
+def create_app(
+    config: Config | None = None,
+    store: Store | None = None,
+    allow_origins: Sequence[str] = (),
+) -> FastAPI:
     cfg = config or Config()
     db = store or Store(cfg.output.sqlite or "countbone.db")
     tracker = RunTracker()
@@ -131,6 +136,18 @@ def create_app(config: Config | None = None, store: Store | None = None) -> Fast
     app.state.config = cfg
     app.state.store = db
     app.state.tracker = tracker
+    if allow_origins:
+        # Only for browser apps on another origin (the mobile app's web
+        # preview). Native apps and the bundled dashboard never need it, so it
+        # is off unless origins are named; "*" is deliberately not special.
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(allow_origins),
+            allow_methods=["GET", "POST"],
+            allow_headers=["Content-Type"],
+        )
 
     # -- helpers ---------------------------------------------------------
     def submit(source: str, run_id: str) -> None:
