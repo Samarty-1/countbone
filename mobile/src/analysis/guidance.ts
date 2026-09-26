@@ -98,7 +98,11 @@ interface CueState {
 
 export interface EngineInput {
   sample: FrameSample;
-  /** Device pitch in degrees from upright (+ = top tilted away), or null if no sensor. */
+  /**
+   * Camera aim in degrees above level (+ = aimed up, top of the phone tipped
+   * back towards the operator), or null if there is no sensor. Aimed up asks
+   * for "Tilt down"; aimed at the floor asks for "Tilt up".
+   */
   tiltDeg: number | null;
   recording: boolean;
 }
@@ -117,6 +121,7 @@ export class GuidanceEngine {
   private direction: 'left' | 'right' | null = null;
   private cues = new Map<CueId, CueState>();
   private wasRecording = false;
+  private boxes: Box[] = [];
 
   /** Forget motion history, e.g. when a recording starts or the source changes. */
   reset(): void {
@@ -128,6 +133,7 @@ export class GuidanceEngine {
     this.dirSince = null;
     this.direction = null;
     this.cues.clear();
+    this.boxes = [];
   }
 
   update({ sample, tiltDeg, recording }: EngineInput): Guidance {
@@ -154,6 +160,13 @@ export class GuidanceEngine {
       const dy = sy.confidence > 0.15 ? sy.shift : this.priorDy;
       this.priorDx = dx;
       this.priorDy = dy;
+      if (!sample.boxes) {
+        // Outlines from an earlier sample ride along with the measured
+        // motion, so they stay on their cartons between measurements.
+        const ox = dx / sample.thumbWidth;
+        const oy = dy / sample.thumbHeight;
+        this.boxes = this.boxes.map((b) => ({ ...b, x: b.x + ox, y: b.y + oy }));
+      }
       const a = Math.min(1, dt / 0.3); // ~0.3 s smoothing
       this.vx += a * (dx / sample.thumbWidth / dt - this.vx);
       this.vy += a * (dy / sample.thumbHeight / dt - this.vy);
@@ -165,6 +178,7 @@ export class GuidanceEngine {
       }
     }
     this.prev = sample;
+    if (sample.boxes) this.boxes = sample.boxes;
 
     this.trackDirection(t, recording);
 
@@ -192,7 +206,7 @@ export class GuidanceEngine {
         vertical: this.vy,
         direction: this.direction,
       },
-      boxes: sample.boxes,
+      boxes: this.boxes,
     };
   }
 

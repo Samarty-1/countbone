@@ -1,3 +1,4 @@
+/// <reference types="node" />
 /**
  * The analysis core is plain TypeScript, so it is tested under Node directly:
  *   npm test
@@ -14,8 +15,10 @@ import {
   edgeBoxes,
   estimateShift,
   projections,
+  rotateLuma,
   sampleFrame,
   type FrameSample,
+  type Luma,
 } from './metrics.ts';
 
 const W = 960;
@@ -53,7 +56,10 @@ function blur(img: Uint8Array, r: number): Uint8Array {
       let n = 0;
       for (let d = -r; d <= r; d++) {
         const xx = x + d;
-        if (xx >= 0 && xx < W) (s += img[y * W + xx]!), n++;
+        if (xx >= 0 && xx < W) {
+          s += img[y * W + xx]!;
+          n++;
+        }
       }
       tmp[y * W + x] = s / n;
     }
@@ -64,7 +70,10 @@ function blur(img: Uint8Array, r: number): Uint8Array {
       let n = 0;
       for (let d = -r; d <= r; d++) {
         const yy = y + d;
-        if (yy >= 0 && yy < H) (s += tmp[yy * W + x]!), n++;
+        if (yy >= 0 && yy < H) {
+          s += tmp[yy * W + x]!;
+          n++;
+        }
       }
       out[y * W + x] = s / n;
     }
@@ -171,4 +180,54 @@ test('walking back over counted stock is flagged', () => {
   const g = run((i) => shelf(i < 15 ? i * 12 : 180 - (i - 15) * 18), 25);
   assert.equal(g.hud.direction, 'right');
   assert.ok(g.cues.some((c) => c.id === 'reverse'), JSON.stringify(g.cues));
+});
+
+// -- orientation ----------------------------------------------------------
+
+/** Rotate a full frame 90° anticlockwise: what a portrait phone's landscape sensor delivers. */
+function sensorBuffer(upright: Uint8Array): Uint8Array {
+  const out = new Uint8Array(W * H);
+  // Output is H wide and W tall; output (x, y) = upright (W - 1 - y, x).
+  for (let y = 0; y < W; y++) for (let x = 0; x < H; x++) out[y * H + x] = upright[x * W + (W - 1 - y)]!;
+  return out;
+}
+
+test('rotateLuma is a clockwise quarter turn and four of them are the identity', () => {
+  const l = { data: Uint8Array.from([1, 2, 3, 4, 5, 6]), width: 3, height: 2 };
+  // 1 2 3        4 1
+  // 4 5 6   ->   5 2
+  //              6 3
+  assert.deepEqual([...rotateLuma(l, 90).data], [4, 1, 5, 2, 6, 3]);
+  let r: Luma = l;
+  for (let i = 0; i < 4; i++) r = rotateLuma(r, 90);
+  assert.deepEqual([...r.data], [...l.data]);
+  assert.deepEqual([...rotateLuma(l, 180).data], [6, 5, 4, 3, 2, 1]);
+  assert.deepEqual([...rotateLuma(rotateLuma(l, 90), 270).data], [...l.data]);
+});
+
+test('a walk filmed on a sideways sensor reads as horizontal once rotated', () => {
+  const engine = new GuidanceEngine();
+  let g;
+  for (let i = 0; i < 20; i++) {
+    const buf = sensorBuffer(shelf(i * 12)); // H wide, W tall
+    const s = sampleFrame(buf, H, W, H, 1, i / 10, false, 90);
+    assert.equal(s.srcWidth, W);
+    assert.equal(s.srcHeight, H);
+    g = engine.update({ sample: s, tiltDeg: null, recording: true });
+  }
+  // Content moves left at 0.125 frame widths/s: a steady walk to the right.
+  assert.ok(g!.hud.speed < -0.08, `speed ${g!.hud.speed}`);
+  assert.ok(Math.abs(g!.hud.vertical) < 0.05, `vertical ${g!.hud.vertical}`);
+  assert.equal(g!.hud.direction, 'right');
+});
+
+test('outlines persist between measurements and follow the pan', () => {
+  const engine = new GuidanceEngine();
+  const a = engine.update({ sample: sampleFrame(shelf(0), W, H, W, 1, 0, true), tiltDeg: null, recording: false });
+  assert.ok(a.boxes.length > 5, `measured ${a.boxes.length}`);
+  // Next sample skips outlines; the content moved 24 px left (0.025 of the width).
+  const b = engine.update({ sample: sampleFrame(shelf(24), W, H, W, 1, 0.1, false), tiltDeg: null, recording: false });
+  assert.equal(b.boxes.length, a.boxes.length);
+  const moved = b.boxes[0]!.x - a.boxes[0]!.x;
+  assert.ok(Math.abs(moved - -24 / W) < 0.01, `moved ${moved}`);
 });

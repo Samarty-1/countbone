@@ -179,8 +179,8 @@ export function projections(l: Luma): { cols: Float32Array; rows: Float32Array }
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const v = data[y * w + x]!;
-      cols[x] += v;
-      rows[y] += v;
+      cols[x] = cols[x]! + v;
+      rows[y] = rows[y]! + v;
     }
   }
   let cm = 0;
@@ -392,9 +392,46 @@ export function edgeBoxes(l: Luma, maxBoxes = 40): Box[] {
   return kept.slice(0, maxBoxes);
 }
 
+/**
+ * Clockwise rotation, in degrees, that turns a buffer upright. Phone cameras
+ * deliver buffers in the sensor's native (landscape) orientation; motion and
+ * outlines must be measured upright, or a sideways walk reads as vertical.
+ */
+export type Rotation = 0 | 90 | 180 | 270;
+
+/** Rotate a thumbnail clockwise. Cheap at thumbnail size, unlike the full frame. */
+export function rotateLuma(l: Luma, rotation: Rotation): Luma {
+  'worklet';
+  if (rotation === 0) return l;
+  const { data, width: w, height: h } = l;
+  const out = new Uint8Array(w * h);
+  const ow = rotation === 180 ? w : h;
+  const oh = rotation === 180 ? h : w;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const v = data[y * w + x]!;
+      let ox: number;
+      let oy: number;
+      if (rotation === 90) {
+        ox = h - 1 - y;
+        oy = x;
+      } else if (rotation === 180) {
+        ox = w - 1 - x;
+        oy = h - 1 - y;
+      } else {
+        ox = y;
+        oy = w - 1 - x;
+      }
+      out[oy * ow + ox] = v;
+    }
+  }
+  return { data: out, width: ow, height: oh };
+}
+
 export interface FrameSample {
-  /** Seconds, from the camera clock. */
+  /** Seconds, monotonic within one source. */
   t: number;
+  /** Upright frame size (after rotation). */
   srcWidth: number;
   srcHeight: number;
   /** Laplacian variance at the backend's 960 px scale (same scale as its quality gate). */
@@ -410,8 +447,12 @@ export interface FrameSample {
   rows: number[];
   thumbWidth: number;
   thumbHeight: number;
-  /** Edge-preview outlines, normalised to 0..1 of the frame. */
-  boxes: Box[];
+  /**
+   * Edge-preview outlines, normalised to 0..1 of the frame, or null when
+   * this sample skipped them (they are the costliest metric, so callers
+   * measure them on a fraction of frames).
+   */
+  boxes: Box[] | null;
 }
 
 /**
@@ -428,9 +469,13 @@ export function sampleFrame(
   bytesPerPixel: 1 | 4,
   t: number,
   withBoxes: boolean,
+  rotation: Rotation = 0,
 ): FrameSample {
   'worklet';
-  const thumb = downsample(src, srcW, srcH, stride, bytesPerPixel);
+  // Blur and exposure do not depend on orientation (the Laplacian is
+  // symmetric), so only the thumbnail is rotated, never the full frame.
+  const thumb = rotateLuma(downsample(src, srcW, srcH, stride, bytesPerPixel), rotation);
+  const sideways = rotation === 90 || rotation === 270;
   const { brightness, clipped } = exposure(thumb);
   let sq = 0;
   for (let i = 0; i < thumb.data.length; i++) {
@@ -445,11 +490,11 @@ export function sampleFrame(
         w: b.w / thumb.width,
         h: b.h / thumb.height,
       }))
-    : [];
+    : null;
   return {
     t,
-    srcWidth: srcW,
-    srcHeight: srcH,
+    srcWidth: sideways ? srcH : srcW,
+    srcHeight: sideways ? srcW : srcH,
     blur: blurAtBackendScale(src, srcW, srcH, stride, bytesPerPixel),
     brightness,
     clipped,

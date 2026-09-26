@@ -69,6 +69,23 @@ countbone serve            # dashboard + API on http://127.0.0.1:8000
 The source lives in [`web/`](web/README.md). Its build ships inside the Python package, so running
 the dashboard needs no Node.
 
+## The mobile app
+
+[`mobile/`](mobile/README.md) is the capture side: an Expo app that films the aisle and tells the
+operator, while filming, what would hurt the count. It warns about going too fast, blur, dim light,
+glare, walking back over counted stock, tilt and drift in distance, using the backend quality
+gate's own thresholds. It shows a direction arrow, a framing grid and a stats readout, and vibrates
+when a problem appears mid-take. The take is then uploaded, the count followed live, and the review
+queue worked through by swiping.
+
+```bash
+countbone serve --allow-origin http://localhost:8081
+cd mobile && npm install && npx expo start --web
+```
+
+The browser preview uses the webcam, or replays a video file as if it were the camera, so the
+whole loop can be tried without a phone.
+
 ## What you get
 
 | | |
