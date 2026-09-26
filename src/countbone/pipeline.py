@@ -102,6 +102,8 @@ class Pipeline:
             )
             if kept is None:
                 result.frames_dropped += 1
+                # The frame is gone, its camera movement is not (see Tracker).
+                tracker.observe_motion(frame.meta.get("motion"))
                 continue
             frame = kept
             result.frames_used += 1

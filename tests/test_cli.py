@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -27,6 +28,17 @@ def test_run_prints_a_table(demo_scene, config, tmp_path, capsys):
     assert "TOTAL" in out
     assert "confidence:" in out
     assert "wrote:" in out
+
+
+def test_a_cli_run_can_be_inspected_in_the_dashboard(demo_scene, config, tmp_path, capsys):
+    """Same database as the dashboard, so it must leave the inspector file too."""
+    main(["run", demo_scene.path, "--json", *base_args(config, tmp_path)])
+    payload = json.loads(capsys.readouterr().out)
+    doc = json.loads(
+        (Path(config.output.dir) / payload["run_id"] / "inspector.json").read_text(encoding="utf-8")
+    )
+    assert len(doc["frames"]) == payload["frames_read"]
+    assert doc["boxes"]
 
 
 def test_run_json_output_is_parseable(demo_scene, config, tmp_path, capsys):

@@ -26,23 +26,22 @@ countbone demo
 `demo` renders a synthetic shelf with known ground truth, counts it, and scores itself:
 
 ```
-synthetic shelf: examples/demo_shelf.mp4  (34 units, 144 frames)
+synthetic shelf: examples/demo_shelf.webm  (34 units, 144 frames)
 
-run run_628c61b93d2b  (0.64s)
-frames: 27 used, 2 dropped  detections: 416  tracks: 33
+run run_ad7e76965deb  (1.30s)
+frames: 26 used, 3 dropped  detections: 388  tracks: 34
 
   SKU             count  expected   var   conf  truth   err
   ---------------------------------------------------------
   SKU-BLU            11        11    +0    94%     11    +0
-  SKU-GRN             8         8    +0    96%      8    +0
-  SKU-RED             9        10    -1    90%     10    -1
-  SKU-YEL             5         5    +0    95%      5    +0
-  TOTAL              33
+  SKU-GRN             8         8    +0    97%      8    +0
+  SKU-RED            10        10    +0    95%     10    +0
+  SKU-YEL             5         5    +0    97%      5    +0
+  TOTAL              34
 
-confidence: 93%   needs review: yes (18 item(s))
-  ! 5 object(s) changed identity between frames
+confidence: 95%   needs review: no (0 item(s))
 
-absolute count error: 1 of 34 (2.9%)
+absolute count error: 0 of 34 (0.0%)
 ```
 
 Then on your own footage:
@@ -51,6 +50,41 @@ Then on your own footage:
 countbone run shelf.mp4 --expect SKU-RED=10 --expect SKU-BLU=11
 countbone serve            # dashboard + API on http://127.0.0.1:8000
 ```
+
+## The dashboard
+
+`countbone serve` opens a dark, keyboard-driven dashboard at http://127.0.0.1:8000:
+
+- **New count**: drop an MP4/MOV, preview it, upload with progress.
+- **Live pipeline**: the six stages as they run, with throughput, dropped frames, blur and lighting
+  telemetry from the pipeline itself.
+- **Results**: metric cards and a searchable, filterable SKU table. Export CSV/JSON with reviewer
+  recounts, or download the pipeline's own audited `counts.csv` / `result.json`.
+- **Items to check**: every low-confidence detection, shown as the crop the model saw beside the
+  catalog SKUs ranked by colour distance. Approve, correct, reject or recount with `A`, `1`–`9`,
+  `R` and `J`/`K`. Every decision, including undo, goes into the audit trail.
+- **Frame inspector**: the source video with every detection box overlaid, counted and uncounted,
+  per sampled frame, with a timeline and per-object track history.
+
+The source lives in [`web/`](web/README.md). Its build ships inside the Python package, so running
+the dashboard needs no Node.
+
+## The mobile app
+
+[`mobile/`](mobile/README.md) is the capture side: an Expo app that films the aisle and tells the
+operator, while filming, what would hurt the count. It warns about going too fast, blur, dim light,
+glare, walking back over counted stock, tilt and drift in distance, using the backend quality
+gate's own thresholds. It shows a direction arrow, a framing grid and a stats readout, and vibrates
+when a problem appears mid-take. The take is then uploaded, the count followed live, and the review
+queue worked through by swiping.
+
+```bash
+countbone serve --allow-origin http://localhost:8081
+cd mobile && npm install && npx expo start --web
+```
+
+The browser preview uses the webcam, or replays a video file as if it were the camera, so the
+whole loop can be tried without a phone.
 
 ## What you get
 
@@ -79,7 +113,7 @@ Each stage does one thing and is replaceable.
 Counting is the hard part, and it is the part most systems get wrong. A camera panning an aisle
 moves every box at once, so `stages/motion.py` estimates the global camera displacement between
 frames by phase correlation and the tracker predicts each box forward by it. Without that step,
-the demo above counts 56 instead of 34 — one carton becomes several. With it, 33.
+the demo above counts 52 instead of 34 — one carton becomes several. With it, 34. Motion is tracked through frames the quality gate drops, too: skipping it split every carton in view at a dropped frame (see `docs/ARCHITECTURE.md`).
 
 ## The plugins
 
@@ -160,8 +194,9 @@ cannot take the backbone down mid-count.
   exist. For real inventory, train a detector and use `detect.backend: yolo`.
 - **The default identifier matches colour**, not artwork. Real SKUs need a trained classifier, OCR
   or a barcode fallback — all of which fit behind the `Identifier` protocol or the `on_items` hook.
-- **The 2.9% demo error is on synthetic footage.** It is a regression guard for the backbone, not a
-  claim about a warehouse. Accuracy on real stock depends entirely on the detector you plug in.
+- **The exact demo counts are on synthetic footage.** Ten synthetic shelves count exactly and the
+  test suite guards three of them, but that is a regression guard for the backbone, not a claim
+  about a warehouse. Accuracy on real stock depends entirely on the detector you plug in.
 - **The audit pack is tamper-evident, not tamper-proof.** Anyone who can rewrite the pack can
   rewrite the hashes. Notarising the manifest hash externally is the next step, deliberately out
   of scope here.
@@ -187,7 +222,7 @@ Each phase adds plugins. The backbone does not change. See [docs/ROADMAP.md](doc
 
 ```bash
 pip install -e ".[api,dev]"
-pytest              # 105 tests
+pytest
 ruff check .
 ```
 

@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "Countbone",
+    "slug": "countbone",
+    "scheme": "countbone",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0b0c0e",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.countbone.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Countbone films the shelf you are counting.",
+        "NSMicrophoneUsageDescription": "Countbone records audio with the shelf video only if you turn it on.",
+        "NSMotionUsageDescription": "Countbone uses the motion sensors to tell you when to hold the phone level."
+      }
+    },
+    "android": {
+      "package": "com.countbone.mobile",
+      "permissions": ["android.permission.CAMERA", "android.permission.RECORD_AUDIO"],
+      "adaptiveIcon": {
+        "backgroundColor": "#0b0c0e",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "output": "single",
+      "backgroundColor": "#0b0c0e"
+    },
+    "plugins": ["expo-router", "expo-status-bar", "expo-font"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
