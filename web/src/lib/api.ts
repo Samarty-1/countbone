@@ -479,6 +479,9 @@ export interface ProductQuality {
   nearest_similarity: number | null;
   accept_threshold: number;
   status: "ready" | "needs photos" | "confusable";
+  /** Shares its colour with an unphotographed product and has too few photos to trust its own bar. */
+  more_photos_advised: boolean;
+  photos_advised: number;
 }
 
 export interface StudioQuality {

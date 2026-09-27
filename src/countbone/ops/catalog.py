@@ -232,6 +232,9 @@ def quality(services: Services) -> dict[str, Any]:
     photos: dict[str, set[str]] = {}
     for e in catalog.exemplars:
         photos.setdefault(e.sku, set()).add(e.group)
+    from ..stages.identify import _bands_overlap, shadowed
+
+    held = {e.sku for e in shadowed(catalog, index) if not index.well_photographed(e.sku)}
     per: dict[str, dict[str, Any]] = {}
     for sku in index.skus:
         own = [p for p in probes if p.sku == sku]
@@ -260,12 +263,18 @@ def quality(services: Services) -> dict[str, Any]:
             "photos": n_photos, "self_recognition": None if accuracy is None else round(accuracy, 3),
             "confused_with": confusions, "nearest": nearest[0],
             "nearest_similarity": None if nearest[1] is None else round(nearest[1], 4),
-            "accept_threshold": round(index.accept_for(sku), 4), "status": status,
+            # Shares its colour with an unphotographed product, and has too few
+            # photos for its own bar to be trusted: it is held to a stricter
+            # one (the bar shown is the one applied), so some genuine sightings
+            # go to review until it has more.
+            "accept_threshold": round(max(index.accept_for(sku), appearance.DEFAULT_ACCEPT)
+                                      if sku in held else index.accept_for(sku), 4),
+            "status": status,
+            "more_photos_advised": sku in held,
+            "photos_advised": appearance.MIN_PHOTOS_FOR_OWN_BAR,
         }
     # Colour-only products a photographed look-alike now shadows: sightings
     # of these become "unknown" until they are photographed too.
-    from ..stages.identify import _bands_overlap
-
     enrolled = [e for e in catalog.entries if e.sku in set(index.skus)]
     conflicts = []
     for e in catalog.entries:

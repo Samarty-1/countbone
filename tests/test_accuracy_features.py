@@ -343,3 +343,32 @@ def _quiet():
     logging.disable(logging.WARNING)
     yield
     logging.disable(logging.NOTSET)
+
+
+def test_few_photos_and_an_unphotographed_look_alike_hold_the_bar_up():
+    """With five photos a product's own bar is set by one or two odd views
+    (it ranged 0.914-0.968 over photo sets), and a colour look-alike nobody
+    photographed can never win a match to catch a wrong one. Such products
+    are held to at least the default bar until they have enough photos."""
+    from countbone.config import IdentifyConfig
+    from countbone.stages.identify import AppearanceIdentifier
+
+    def catalog(n_photos: int, seed: int) -> Catalog:
+        entries = [SkuEntry("RED-DOT", "Red, dot", hue=(170, 10)),
+                   SkuEntry("SKU-RED", "Plain red, no photos", hue=(170, 10))]
+        exemplars = []
+        for j, photo in enumerate(demo.product_photos("RED-DOT", n_photos, seed=seed)):
+            exemplars += appearance.vectors_for_photo(photo, f"RED-DOT:{j}", "RED-DOT")
+        return Catalog(entries, exemplars)
+
+    few = catalog(5, seed=5)  # the loosest five-photo set measured
+    ident = AppearanceIdentifier(IdentifyConfig(), few)
+    assert ident.index.accept_for("RED-DOT") < appearance.DEFAULT_ACCEPT
+    assert ident._floor == {"RED-DOT": appearance.DEFAULT_ACCEPT}
+
+    many = catalog(appearance.MIN_PHOTOS_FOR_OWN_BAR, seed=5)
+    assert AppearanceIdentifier(IdentifyConfig(), many)._floor == {}
+
+    # No look-alike without photos: nothing to guard against.
+    alone = Catalog([SkuEntry("RED-DOT", "Red, dot", hue=(170, 10))], few.exemplars)
+    assert AppearanceIdentifier(IdentifyConfig(), alone)._floor == {}

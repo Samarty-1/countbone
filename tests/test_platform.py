@@ -621,8 +621,11 @@ def test_photographing_one_product_does_not_break_colour_counting(env, scene):
     # Plain red cartons are not filed as the red look-alike...
     assert counts.get("RED-DOT", 0) == 0
     # ...and the studio says why they went to review.
-    conflicts = m.get("/api/studio/quality").json()["colour_conflicts"]
+    quality = m.get("/api/studio/quality").json()
+    conflicts = quality["colour_conflicts"]
     assert any(c["sku"] == "SKU-RED" and "RED-DOT" in c["shares_colour_with"] for c in conflicts)
+    # Five photos and an unphotographed look-alike: the studio asks for more.
+    assert quality["products"]["RED-DOT"]["more_photos_advised"] is True
 
 
 # -- service jobs and the data engine --------------------------------------------------------------
