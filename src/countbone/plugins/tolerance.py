@@ -14,9 +14,11 @@ from ..types import CountResult
 from .base import Plugin, register
 
 DEFAULT_BANDS = [
-    # up to unit_value, allowed absolute units, allowed fraction of expected
-    {"max_unit_value": 10.0, "abs": 2, "pct": 0.03},
-    {"max_unit_value": 100.0, "abs": 1, "pct": 0.01},
+    # Out of the box every miss is flagged: a count that disagrees with the
+    # expected number is exactly what a customer bought this to find. Loosen
+    # per value band in config once the business has decided what is noise,
+    # e.g. {"max_unit_value": 10.0, "abs": 2, "pct": 0.03} for cheap cartons.
+    # (What gets auto-approved is a separate decision: see ops.reconcile.)
     {"max_unit_value": None, "abs": 0, "pct": 0.0},
 ]
 

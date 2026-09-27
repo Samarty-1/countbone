@@ -18,11 +18,16 @@ import yaml
 
 @dataclass
 class CaptureConfig:
-    every_n_frames: int = 5          # sample rate through the source video
-    max_frames: int | None = 400     # hard cap so a long video cannot stall a run
+    every_n_frames: int = 5          # the widest stride; adaptive sampling only ever narrows it
+    # Hard cap so a runaway source cannot stall a run. Reaching it is flagged
+    # for review (the rest of the video went uncounted), never silent.
+    max_frames: int | None = 5000
     start_s: float = 0.0
     end_s: float | None = None
     resize_width: int | None = 960   # None keeps native resolution
+    adaptive: bool = True            # closed-loop sampling, see stages.capture.Sampler
+    target_shift_frac: float = 0.25  # aim for this much scene movement per sample, in object widths
+    max_shift_frac: float = 0.6      # back-fill skipped frames when a gap moves further than this
 
 
 @dataclass
@@ -46,7 +51,8 @@ class DetectConfig:
 
 @dataclass
 class IdentifyConfig:
-    backend: str = "color"           # color | classmap | fixture
+    backend: str = "auto"            # auto (appearance once photos exist, else color)
+                                     # | appearance | color | classmap | fixture
     catalog: str | None = None       # path to a SKU catalog YAML
     min_confidence: float = 0.2
     unknown_sku: str = "UNKNOWN"
@@ -81,6 +87,9 @@ DEFAULT_PLUGINS = [
     PluginSpec("quality_gate"),
     PluginSpec("multiframe"),
     PluginSpec("confidence"),
+    # On by default: it only acts when a count has an expected number, and a
+    # count that misses its expected number must never say "no review needed".
+    PluginSpec("tolerance"),
     PluginSpec("review_queue"),
     PluginSpec("exception_report"),
     PluginSpec("audit_pack"),

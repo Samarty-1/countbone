@@ -10,6 +10,8 @@ Hooks, in the order the backbone fires them:
     on_frame(ctx, frame)     -> Frame | None   capture layer; None drops the frame
     on_detections(ctx, f, d) -> list[Detection]
     on_items(ctx, f, items)  -> list[Item]     identification layer
+    on_frame_tracked(ctx, f, items) -> None    after the tracker assigned track ids,
+                                               while the frame's pixels are in hand
     on_tracks(ctx, tracks)   -> list[Track]    after counting has grouped sightings
     on_counts(ctx, result)   -> CountResult    count layer
     on_output(ctx, result)   -> None           output layer, side effects only
@@ -60,6 +62,8 @@ class Plugin:
         self, ctx: RunContext, frame: Frame, items: list[Item]
     ) -> list[Item]:
         return items
+
+    def on_frame_tracked(self, ctx: RunContext, frame: Frame, items: list[Item]) -> None: ...
 
     def on_tracks(self, ctx: RunContext, tracks: list[Track]) -> list[Track]:
         return tracks

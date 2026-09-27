@@ -149,7 +149,107 @@ class FixtureIdentifier:
         ]
 
 
+class BarcodeReader:
+    """Read an EAN/UPC off a sighting when one is legible.
+
+    A readable barcode is the strongest identity evidence there is, but most
+    video crops are too small or soft to decode, so this is tried only on
+    large crops and only when the catalog lists barcodes at all.
+    """
+
+    MIN_WIDTH = 90  # px; below this a 1D code cannot resolve at video quality
+
+    def __init__(self, catalog: Catalog) -> None:
+        self.catalog = catalog
+        self.enabled = any(e.barcodes for e in catalog.entries)
+        self._detector = cv2.barcode.BarcodeDetector() if self.enabled else None
+
+    def read(self, patch: np.ndarray):
+        if not self.enabled or patch.shape[1] < self.MIN_WIDTH:
+            return None
+        try:
+            text, _, _ = self._detector.detectAndDecode(patch)
+        except cv2.error:
+            return None
+        return self.catalog.by_barcode(text) if text else None
+
+
+class AppearanceIdentifier:
+    """Identify by artwork, from photos enrolled in Catalog Studio.
+
+    Each sighting is embedded and matched against the enrolled examples
+    (see appearance.py); a readable barcode overrides the match. SKUs that
+    were never photographed are still recognised by colour, so a catalog
+    can move from colour bands to photos one product at a time.
+    """
+
+    name = "appearance"
+
+    def __init__(self, cfg: IdentifyConfig, catalog: Catalog) -> None:
+        from .. import appearance
+
+        self.cfg = cfg
+        self.catalog = catalog
+        self.index = catalog.index()
+        self._embed = appearance.embed
+        self._confidence = appearance.confidence
+        self.barcodes = BarcodeReader(catalog)
+        enrolled = set(self.index.skus)
+        # Colour covers only products nobody has photographed: colour-matching
+        # an enrolled look-alike would undo what the photos taught.
+        self.colour = ColorIdentifier(
+            cfg, Catalog([e for e in catalog.entries if e.sku not in enrolled])
+        )
+
+    def identify(self, frame: Frame, detections: list[Detection]) -> list[Item]:
+        items: list[Item] = []
+        for det in detections:
+            patch = crop(frame, det)
+            entry = self.barcodes.read(patch)
+            if entry is not None:
+                items.append(Item(det, entry.sku, entry.label, 0.98, "barcode",
+                                  meta={"candidates": [{"sku": entry.sku, "score": 1.0}]}))
+                continue
+            if patch.size < 16 * 3:
+                items.append(Item(det, self.cfg.unknown_sku, "Unidentified", 0.0, "fallback"))
+                continue
+            matches = self.index.match(self._embed(patch)) if len(self.index) else []
+            accept = self.index.accept_for(matches[0].sku) if matches else self.index.accept
+            conf = self._confidence(matches, accept, self.index.margin)
+            candidates = [{"sku": m.sku, "score": round(m.score, 4)} for m in matches]
+            if matches and matches[0].score >= accept:
+                entry = self.catalog.by_sku(matches[0].sku)
+                items.append(Item(det, matches[0].sku, entry.label if entry else matches[0].sku,
+                                  conf, "appearance", meta={"candidates": candidates}))
+                continue
+            # Not like any photo: perhaps a product that is only colour-banded.
+            fallback = self.colour.identify(frame, [det])[0]
+            if fallback.sku != self.cfg.unknown_sku:
+                fallback.meta["candidates"] = candidates
+                items.append(fallback)
+                continue
+            items.append(Item(det, self.cfg.unknown_sku, "Unidentified", conf, "fallback",
+                              meta={"candidates": candidates, **fallback.meta}))
+        return items
+
+
+class AutoIdentifier:
+    """The default: appearance once any product has photos, colour until then.
+
+    Chosen per run (the pipeline rebuilds its identifier when the catalog
+    changes), so enrolling the first photos switches a deployment over
+    without a config edit.
+    """
+
+    def __new__(cls, cfg: IdentifyConfig, catalog: Catalog):  # type: ignore[misc]
+        if catalog.exemplars:
+            return AppearanceIdentifier(cfg, catalog)
+        return ColorIdentifier(cfg, catalog)
+
+
 BACKENDS = {
+    "auto": AutoIdentifier,
+    "appearance": AppearanceIdentifier,
     "color": ColorIdentifier,
     "classmap": ClassMapIdentifier,
     "fixture": FixtureIdentifier,
