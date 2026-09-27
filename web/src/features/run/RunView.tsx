@@ -1,13 +1,14 @@
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { AlertTriangle, ChevronDown, ClipboardCheck, FileQuestion, Fingerprint, ScanEye, Table2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, ClipboardCheck, FileQuestion, Fingerprint, LayoutGrid, ScanEye, Table2 } from "lucide-react";
 import { ApiError, isPending, type RunDetail } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { duration, runTitle, shortId } from "@/lib/format";
+import { duration, KIND_LABEL, pct, runTitle, shortId } from "@/lib/format";
 import { useCatalog, useHealth, useRun, useRuns } from "@/lib/queries";
-import { navigate, patchRun, type Route } from "@/lib/route";
+import { navigate, pageHref, patchRun, type Route } from "@/lib/route";
 import { buildRows } from "@/lib/status";
-import { Button, Empty, Skeleton } from "@/components/ui";
+import { Badge, Button, Empty, Skeleton } from "@/components/ui";
+import { ShelfPanel } from "./ShelfPanel";
 import { PipelineTracker } from "@/features/pipeline/PipelineTracker";
 import { MetricCards } from "@/features/results/MetricCards";
 import { CountsTable } from "@/features/results/CountsTable";
@@ -61,6 +62,26 @@ function Provenance({ run }: { run: RunDetail }) {
                 <dd className="break-all text-muted">{run.source}</dd>
                 <dt className="text-subtle">config</dt>
                 <dd className="text-muted">{run.config_fingerprint ?? "—"}</dd>
+                <dt className="text-subtle">identified by</dt>
+                <dd className="text-muted">{run.meta.identifier ?? "colour"}</dd>
+                {run.meta.sampling && (
+                  <>
+                    <dt className="text-subtle">sampling</dt>
+                    <dd className="text-muted">
+                      {run.meta.sampling.emitted} frames, stride down to {run.meta.sampling.min_step} of {run.meta.sampling.base_step},{" "}
+                      {run.meta.sampling.backfilled} back-filled, {run.meta.sampling.retries} retried after a blurred frame
+                    </dd>
+                  </>
+                )}
+                {run.meta.continuity && (
+                  <>
+                    <dt className="text-subtle">continuity</dt>
+                    <dd className={run.meta.continuity.broken_gaps ? "text-warn" : "text-muted"}>
+                      {pct(run.meta.continuity.score)} · worst gap {run.meta.continuity.max_shift_objects.toFixed(2)} object widths
+                      {run.meta.continuity.broken_gaps ? ` · ${run.meta.continuity.broken_gaps} gap(s) too wide` : ""}
+                    </dd>
+                  </>
+                )}
                 {run.meta.audit && (
                   <>
                     <dt className="text-subtle">manifest sha256</dt>
@@ -82,6 +103,7 @@ function Tabs({ route, pending }: { route: RunRoute; pending: number }) {
   const tabs = [
     { key: "results" as const, label: "Results", icon: Table2 },
     { key: "inspect" as const, label: "Frame inspector", icon: ScanEye },
+    { key: "shelf" as const, label: "Shelf & evidence", icon: LayoutGrid },
   ];
   return (
     <nav aria-label="Run views" className="flex gap-1">
@@ -116,7 +138,7 @@ export function RunView({ route }: { route: RunRoute }) {
 
   const detail = q.data && !isPending(q.data) ? q.data : null;
   const rows = useMemo(
-    () => (detail ? buildRows(detail.counts, detail.reviews, catalog.data, unknownSku) : []),
+    () => (detail ? buildRows(detail.counts, detail.reviews, catalog.data, unknownSku, detail.final?.rows) : []),
     [detail, catalog.data, unknownSku],
   );
 
@@ -180,6 +202,22 @@ export function RunView({ route }: { route: RunRoute }) {
               <span className="font-mono">{shortId(run.run_id)}</span>
               <span>{new Date(run.started_at * 1000).toLocaleString()}</span>
               <span>{duration(run.duration_s)} to count</span>
+              {run.created_by_name && <span>filmed by {run.created_by_name}</span>}
+            </p>
+            <p className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <Badge tone="neutral">{KIND_LABEL[run.kind] ?? run.kind}</Badge>
+              {run.location && (
+                <a href={pageHref("locations", run.location)}>
+                  <Badge tone="accent">{run.location}</Badge>
+                </a>
+              )}
+              {run.receipt_id && <a href={pageHref("receive", run.receipt_id)}><Badge tone="info">delivery</Badge></a>}
+              {run.walk_id && <a href={pageHref("walks", run.walk_id)}><Badge tone="info">part of a walk</Badge></a>}
+              {run.task_id && <a href={pageHref("tasks")}><Badge tone="info">recount</Badge></a>}
+              {run.final && !run.final.settled && <Badge tone="warn">provisional: {run.final.open_reviews} to check</Badge>}
+              {run.final && run.final.total !== run.final.machine_total && (
+                <Badge tone="accent">final {run.final.total} (machine {run.final.machine_total})</Badge>
+              )}
             </p>
           </div>
           <div className="ml-auto">
@@ -206,7 +244,9 @@ export function RunView({ route }: { route: RunRoute }) {
       </header>
 
       <div className="flex-1 space-y-4 p-4 sm:p-6">
-        {route.tab === "results" ? (
+        {route.tab === "shelf" ? (
+          <ShelfPanel run={run} />
+        ) : route.tab === "results" ? (
           <>
             <Warnings warnings={run.meta.warnings ?? []} />
             <MetricCards run={run} rows={rows} unknownSku={unknownSku} onOpenReview={() => patchRun(route, { review: true })} />

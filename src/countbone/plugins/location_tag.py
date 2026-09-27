@@ -38,17 +38,28 @@ def label_payload(code: str) -> str:
 _detector: cv2.QRCodeDetector | None = None
 
 
-def read_labels(image) -> list[str]:
+def read_labels_at(image) -> list[tuple[str, tuple[float, float, float, float]]]:
+    """Location labels in an image, with where each one is (x1, y1, x2, y2)."""
     global _detector
     if _detector is None:
         _detector = cv2.QRCodeDetector()
     try:
-        ok, texts, _, _ = _detector.detectAndDecodeMulti(image)
+        ok, texts, points, _ = _detector.detectAndDecodeMulti(image)
     except cv2.error:
         return []
-    if not ok:
+    if not ok or points is None:
         return []
-    return [c for t in texts if (c := parse_label(t))]
+    out = []
+    for text, quad in zip(texts, points, strict=False):
+        code = parse_label(text)
+        if code:
+            xs, ys = quad[:, 0], quad[:, 1]
+            out.append((code, (float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max()))))
+    return out
+
+
+def read_labels(image) -> list[str]:
+    return [code for code, _ in read_labels_at(image)]
 
 
 def find_location(source: str, seconds: float = 8.0, stride: int = 3,
@@ -88,14 +99,46 @@ class LocationTag(Plugin):
 
     def on_run_start(self, ctx: RunContext) -> None:
         ctx.state["labels_seen"] = {}
+        ctx.state["label_in_view"] = False
 
     def on_frame(self, ctx: RunContext, frame):
         seen: dict[str, int] = ctx.state.setdefault("labels_seen", {})
-        every = self.watch_every if seen else self.search_every
+        # While a label is in view, look at every frame: its printed squares
+        # are box-shaped, and each frame they are not removed from is a frame
+        # where the detector may take the label for stock.
+        in_view = ctx.state.get("label_in_view", False)
+        every = 1 if in_view else (self.watch_every if seen else self.search_every)
         if frame.index % every == 0:
-            for code in read_labels(frame.image):
+            found = read_labels_at(frame.image)
+            ctx.state["label_in_view"] = bool(found)
+            if found:
+                frame.meta["label_boxes"] = [box for _, box in found]
+            for code, _ in found:
                 seen.setdefault(code, frame.index)
         return frame
+
+    def on_detections(self, ctx: RunContext, frame, detections):
+        boxes = frame.meta.get("label_boxes")
+        if not boxes:
+            return detections
+        keep = []
+        for det in detections:
+            x1, y1, x2, y2 = det.bbox
+            area = max(1e-6, (x2 - x1) * (y2 - y1))
+            inside = False
+            for bx1, by1, bx2, by2 in boxes:
+                # The label's area, grown a little to cover its quiet zone and
+                # the printed code beneath it.
+                w, h = bx2 - bx1, by2 - by1
+                gx1, gy1, gx2, gy2 = bx1 - 0.15 * w, by1 - 0.15 * h, bx2 + 0.15 * w, by2 + 0.45 * h
+                ix = max(0.0, min(x2, gx2) - max(x1, gx1))
+                iy = max(0.0, min(y2, gy2) - max(y1, gy1))
+                if ix * iy / area >= 0.5:
+                    inside = True
+                    break
+            if not inside:
+                keep.append(det)
+        return keep
 
     def on_counts(self, ctx: RunContext, result: CountResult) -> CountResult:
         seen: dict[str, int] = ctx.state.get("labels_seen") or {}

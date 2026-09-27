@@ -138,10 +138,18 @@ class ShelfCheck(Plugin):
         self.max_photos = int(max_photos)
 
     def on_frame_tracked(self, ctx: RunContext, frame, items) -> None:
-        views: list[tuple[int, float, float, int, int]] = ctx.setdefault("shelf_views", list)
+        # Only frames that show the shelf are candidates for a gap photo. The
+        # opening frames of the bay's QR label would otherwise tie with the
+        # first shelf frame, and the label's own squares are detected (never
+        # counted) there, so "has detections" is not enough: which frames show
+        # counted objects is decided in _photos, once counting is done.
+        if not items:
+            return
+        views: list[tuple[int, float, float, int, int, frozenset]] = ctx.setdefault("shelf_views", list)
         ox, oy = frame.meta.get("offset", (0.0, 0.0))
         w, h = frame.shape
-        views.append((frame.source_index, float(ox), float(oy), w, h))
+        tids = frozenset(i.track_id for i in items if i.track_id is not None)
+        views.append((frame.source_index, float(ox), float(oy), w, h, tids))
 
     def on_counts(self, ctx: RunContext, result: CountResult) -> CountResult:
         objects = result.meta.get("tracks_world") or []
@@ -158,7 +166,7 @@ class ShelfCheck(Plugin):
         if plan:
             report["planogram"] = check_planogram(rows_of(objects), plan, gaps)
         if self.photos and gaps:
-            self._photos(ctx, gaps)
+            self._photos(ctx, gaps, {o["track_id"] for o in objects})
         (ctx.artifacts_dir / "shelf.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
         result.meta["shelf"] = {
             "gaps": len(gaps),
@@ -167,8 +175,8 @@ class ShelfCheck(Plugin):
         }
         return result
 
-    def _photos(self, ctx: RunContext, gaps: list[dict[str, Any]]) -> None:
-        views = ctx.state.get("shelf_views") or []
+    def _photos(self, ctx: RunContext, gaps: list[dict[str, Any]], counted: set[int]) -> None:
+        views = [v for v in ctx.state.get("shelf_views") or [] if v[5] & counted]
         if not views:
             return
         out = ctx.artifacts_dir / "gaps"
@@ -177,7 +185,7 @@ class ShelfCheck(Plugin):
         for n, gap in enumerate(gaps[: self.max_photos]):
             gx = (gap["x1"] + gap["x2"]) / 2
             # The view whose centre was closest to the gap: world = image - offset.
-            src, ox, oy, w, h = min(views, key=lambda v: abs((v[3] / 2 - v[1]) - gx))
+            src, ox, oy, w, h, _ = min(views, key=lambda v: abs((v[3] / 2 - v[1]) - gx))
             if src not in cache:
                 try:
                     cache[src] = read_frame(ctx.source, src, ctx.config.capture.resize_width)
@@ -195,3 +203,4 @@ class ShelfCheck(Plugin):
             name = f"gap_{n + 1:02d}.jpg"
             cv2.imwrite(str(out / name), img, [cv2.IMWRITE_JPEG_QUALITY, 85])
             gap["photo"] = f"gaps/{name}"
+            gap["photo_frame"] = src

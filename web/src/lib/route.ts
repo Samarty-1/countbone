@@ -7,11 +7,29 @@ import { useSyncExternalStore } from "react";
  *   #/new                       upload a video
  *   #/runs/<id>                 results
  *   #/runs/<id>/inspect?f=12    frame inspector, at sampled frame 12
+ *   #/runs/<id>/shelf           shelf check and contact sheet
  *   ...?review=1                with the review drawer open
+ *   #/<page>[/<id>][?tab=x]     every other area (tasks, reconcile, receive ...)
  */
+export const PAGES = [
+  "runs",
+  "tasks",
+  "reconcile",
+  "receive",
+  "evidence",
+  "locations",
+  "walks",
+  "studio",
+  "service",
+  "settings",
+] as const;
+export type Page = (typeof PAGES)[number];
+export type RunTab = "results" | "inspect" | "shelf";
+
 export type Route =
   | { view: "new" }
-  | { view: "run"; runId: string; tab: "results" | "inspect"; frame: number | null; review: boolean; sku: string | null };
+  | { view: "run"; runId: string; tab: RunTab; frame: number | null; review: boolean; sku: string | null }
+  | { view: "page"; page: Page; id: string | null; tab: string | null };
 
 function parse(hash: string): Route {
   const [path = "", query = ""] = hash.replace(/^#/, "").split("?");
@@ -22,10 +40,18 @@ function parse(hash: string): Route {
     return {
       view: "run",
       runId: decodeURIComponent(parts[1]),
-      tab: parts[2] === "inspect" ? "inspect" : "results",
+      tab: parts[2] === "inspect" ? "inspect" : parts[2] === "shelf" ? "shelf" : "results",
       frame: f != null && f !== "" ? Number(f) : null,
       review: params.get("review") === "1",
       sku: params.get("sku"),
+    };
+  }
+  if ((PAGES as readonly string[]).includes(parts[0] ?? "")) {
+    return {
+      view: "page",
+      page: parts[0] as Page,
+      id: parts[1] ? decodeURIComponent(parts.slice(1).join("/")) : null,
+      tab: params.get("tab"),
     };
   }
   return { view: "new" };
@@ -33,14 +59,24 @@ function parse(hash: string): Route {
 
 export function href(route: Route): string {
   if (route.view === "new") return "#/new";
+  if (route.view === "page") {
+    const id = route.id ? `/${route.id.split("/").map(encodeURIComponent).join("/")}` : "";
+    return `#/${route.page}${id}${route.tab ? `?tab=${encodeURIComponent(route.tab)}` : ""}`;
+  }
   const params = new URLSearchParams();
   if (route.frame != null) params.set("f", String(route.frame));
   if (route.sku) params.set("sku", route.sku);
   if (route.review) params.set("review", "1");
   const q = params.toString();
-  const tab = route.tab === "inspect" ? "/inspect" : "";
+  const tab = route.tab === "results" ? "" : `/${route.tab}`;
   return `#/runs/${encodeURIComponent(route.runId)}${tab}${q ? `?${q}` : ""}`;
 }
+
+export const pageHref = (page: Page, id: string | null = null, tab: string | null = null) =>
+  href({ view: "page", page, id, tab });
+
+export const runHref = (runId: string) =>
+  href({ view: "run", runId, tab: "results", frame: null, review: false, sku: null });
 
 const subscribe = (cb: () => void) => {
   window.addEventListener("hashchange", cb);
@@ -68,6 +104,9 @@ export function navigate(route: Route, opts: { replace?: boolean } = {}) {
     window.location.hash = next;
   }
 }
+
+export const goPage = (page: Page, id: string | null = null, tab: string | null = null, opts?: { replace?: boolean }) =>
+  navigate({ view: "page", page, id, tab }, opts);
 
 /** Patch the current run route (e.g. open the drawer, move the frame). */
 export function patchRun(

@@ -230,11 +230,49 @@ def test_a_label_in_the_video_files_the_run_under_that_bay(media, tmp_path):
     assert {c.sku: c.count for c in result.counts if c.sku != "UNKNOWN"} == scene.truth
 
 
+def test_gap_photos_show_the_shelf_not_the_label(media, tmp_path):
+    """Regression: the opening label frames tied with the first shelf frame
+    and were chosen as the photo of a shelf gap."""
+    import json
+
+    scene = demo.make_demo_video(media / "label_gaps.webm", seed=12, label="A07-B03")
+    result = Pipeline(_cfg(tmp_path)).run(scene.path)
+    gaps = json.loads((tmp_path / "runs" / result.run_id / "shelf.json").read_text())["gaps"]
+    label_frames = int(scene.fps * 0.75)
+    assert gaps and all(g["photo_frame"] >= label_frames for g in gaps)
+
+
 def test_a_label_for_another_bay_is_flagged(media, tmp_path):
     scene = demo.make_demo_video(media / "label2.webm", seed=3, label="A07-B03")
     result = Pipeline(_cfg(tmp_path)).run(scene.path, context={"location": "Z99"})
     assert result.needs_review
     assert any("filed under Z99" in w for w in result.warnings)
+
+
+def test_scene_cuts_are_detected_and_blur_is_not():
+    import random
+
+    import cv2
+
+    from countbone.stages.motion import MotionEstimator
+
+    board, *_ = demo._shelf(2112, 540, random.Random(3))
+    shelf = board[:, 0:960].copy()
+    moved = board[:, 12:972].copy()
+    blurred = cv2.GaussianBlur(moved, (21, 21), 0)
+    label = demo._label_frames("A1", 960, 540, 1)[0]
+    m = MotionEstimator()
+    m.update(shelf)
+    step = m.update(moved)
+    assert step["estimated"] and not step["cut"] and abs(step["dx"] + 12) < 2
+    assert not m.update(blurred)["cut"]
+    assert m.update(label)["cut"]
+    # The reference frame is not modified by phase correlation (OpenCV 5
+    # windows its inputs in place): the same frame twice is zero motion.
+    m2 = MotionEstimator()
+    m2.update(shelf)
+    again = m2.update(shelf.copy())
+    assert again["estimated"] and abs(again["dx"]) < 0.5 and abs(again["dy"]) < 0.5
 
 
 def test_find_location_prescan(media):

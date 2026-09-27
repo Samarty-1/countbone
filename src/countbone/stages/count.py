@@ -45,6 +45,7 @@ class Tracker:
         self._last_cum: dict[int, tuple[float, float]] = {}
         self._cum = (0.0, 0.0)  # running camera displacement since the first frame
         self._next_id = 1
+        self._cut_at = -1  # frame index of the last scene cut
 
     def update(
         self, frame_index: int, items: list[Item], motion: dict[str, float] | None = None
@@ -57,9 +58,13 @@ class Tracker:
         track instead of one per frame.
         """
         self.observe_motion(motion)
+        if motion and motion.get("cut"):
+            # Nothing continues across a scene cut (see motion.py).
+            self._cut_at = frame_index
 
         live = [
-            t for t in self.tracks if frame_index - t.last_frame <= self.max_gap + 1
+            t for t in self.tracks
+            if frame_index - t.last_frame <= self.max_gap + 1 and t.last_frame >= self._cut_at
         ]
         unmatched = list(items)
         # Highest-overlap pairs first, so a crowded shelf does not get stolen

@@ -17,7 +17,7 @@ import { artifactUrl, type CatalogEntry, type Review, type RunDetail } from "@/l
 import { cn } from "@/lib/cn";
 import { pct, REASONS } from "@/lib/format";
 import { useResolveReview } from "@/lib/queries";
-import { hsvToHex, rankCandidates } from "@/lib/status";
+import { candidatesFor, hsvToHex } from "@/lib/status";
 import { Badge, Button, Empty, IconButton, Kbd, Swatch } from "@/components/ui";
 
 /** Text entry only: a focused radio (a candidate SKU) must not swallow the shortcuts. */
@@ -82,8 +82,10 @@ function ItemDetail({
 }) {
   const { hue, sat, val } = review.meta;
   const measured = hue != null && sat != null && val != null ? hsvToHex(hue, sat, val) : null;
-  const candidates = useMemo(() => rankCandidates(catalog, hue, sat), [catalog, hue, sat]);
-  const washedOut = candidates.length > 0 && candidates.every((c) => c.distanceDeg == null) && hue != null;
+  const candidates = useMemo(() => candidatesFor(catalog, review), [catalog, review]);
+  const byAppearance = !!review.meta.candidates?.length;
+  const washedOut = !byAppearance && candidates.length > 0 && candidates.every((c) => c.distanceDeg == null) && hue != null;
+  const possibleMiss = review.reason === "possible_missed_item";
   const [w, h] = review.bbox ? [review.bbox[2] - review.bbox[0], review.bbox[3] - review.bbox[1]] : [0, 0];
 
   return (
@@ -144,7 +146,7 @@ function ItemDetail({
         <legend className="sr-only">Choose the correct SKU</legend>
         <div className="flex items-center justify-between border-b border-line px-3 py-2 text-xs">
           <span className="font-medium text-fg">Candidate SKUs</span>
-          <span className="text-subtle">{washedOut ? "no colour evidence" : "by colour distance"}</span>
+          <span className="text-subtle">{byAppearance ? "by photo similarity" : washedOut ? "no colour evidence" : "by colour distance"}</span>
         </div>
         <ul className="max-h-80 overflow-y-auto p-1.5">
           {candidates.map((c, i) => {
@@ -183,6 +185,7 @@ function ItemDetail({
                     </span>
                     <span className="block truncate text-[11px] text-subtle">
                       {c.entry.label}
+                      {c.score != null && ` · similarity ${c.score.toFixed(3)}`}
                       {c.distanceDeg != null && ` · Δ${Math.round(c.distanceDeg)}°`}
                       {c.inBand && " · in band"}
                     </span>
@@ -193,7 +196,12 @@ function ItemDetail({
             );
           })}
         </ul>
-        {washedOut ? (
+        {possibleMiss ? (
+          <p className="border-t border-line px-3 py-2 text-[11px] text-info">
+            Seen clearly, but in only one frame, so it is not in the count yet. Confirm to add it (or pick the right
+            product); reject if it is a reflection or not stock.
+          </p>
+        ) : washedOut ? (
           <p className="border-t border-line px-3 py-2 text-[11px] text-warn">
             This patch is almost colourless, so colour can't say which SKU it is. Often it's a shelf label or
             packaging detail rather than stock. Reject it if so.
@@ -427,7 +435,7 @@ export function ReviewDrawer({
       else if (k === "r" && active) (e.preventDefault(), decide("rejected"));
       else if (k === "z") (e.preventDefault(), undo());
       else if (/^[1-9]$/.test(e.key) && active && !isSku) {
-        const c = rankCandidates(catalog, active.meta.hue, active.meta.sat)[Number(e.key) - 1];
+        const c = candidatesFor(catalog, active)[Number(e.key) - 1];
         if (c) setChoice(c.entry.sku);
       }
     };

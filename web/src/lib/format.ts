@@ -49,6 +49,7 @@ export const REASONS: Record<string, string> = {
   low_sku_confidence: "Whole SKU uncertain",
   low_item_confidence: "Low-confidence sighting",
   unidentified: "Not matched to any SKU",
+  possible_missed_item: "Seen once: possibly missed",
 };
 
 /**
@@ -62,3 +63,17 @@ export function runTitle(runId: string, source: string, filename?: string) {
   if (upload) return upload[1]!;
   return f.startsWith("run_") ? `Upload ${shortId(runId)}` : f;
 }
+
+export const money = (v: number | null | undefined, currency = "USD") =>
+  v == null
+    ? "—"
+    : v.toLocaleString(undefined, { style: "currency", currency, maximumFractionDigits: 2 });
+
+export const dateTime = (epochS: number | null | undefined) =>
+  epochS == null ? "—" : new Date(epochS * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+
+export const dateOnly = (epochS: number | null | undefined) =>
+  epochS == null ? "—" : new Date(epochS * 1000).toLocaleDateString(undefined, { dateStyle: "medium" });
+
+/** Kind of run, as people say it. */
+export const KIND_LABEL: Record<string, string> = { count: "Cycle count", receive: "Receiving", recount: "Recount" };

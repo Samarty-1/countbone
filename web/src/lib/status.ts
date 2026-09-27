@@ -1,4 +1,4 @@
-import type { CatalogEntry, Review, SkuCountRow } from "./api";
+import type { CatalogEntry, FinalRow, Review, SkuCountRow } from "./api";
 
 export type Tier = "high" | "medium" | "review";
 
@@ -32,21 +32,35 @@ export interface SkuRow extends SkuCountRow {
   swatch: string | null;
 }
 
-/** Join counts with the catalog and the review queue into one table row. */
+/**
+ * Join counts with the catalog and the review queue into one table row.
+ *
+ * `final` is the server's final count (ops/final.py): the machine's number
+ * with every reviewer decision applied, per object. When given it is the
+ * source of truth for "reviewed"; without it (older servers) only whole-SKU
+ * recounts are shown.
+ */
 export function buildRows(
   counts: SkuCountRow[],
   reviews: Review[],
   catalog: CatalogEntry[] | undefined,
   unknownSku: string,
+  final?: FinalRow[],
 ): SkuRow[] {
   const bySku = new Map(catalog?.map((c) => [c.sku, c]));
-  return counts.map((c) => {
+  const finalBySku = new Map(final?.map((f) => [f.sku, f]));
+  // A reviewer can move units to a SKU the machine never counted.
+  const extra: SkuCountRow[] = (final ?? [])
+    .filter((f) => !counts.some((c) => c.sku === f.sku))
+    .map((f) => ({ sku: f.sku, label: f.label, count: 0, expected: f.expected, variance: f.expected == null ? null : -f.expected, confidence: null }));
+  return [...counts, ...extra].map((c) => {
     const mine = reviews.filter((r) => r.sku === c.sku);
     // A recount lives on the whole-SKU review, resolved by a person.
     const recount = mine.find(
       (r) => r.meta.scope === "sku" && r.status !== "pending" && r.meta.resolved_count != null,
     );
-    const reviewedCount = recount?.meta.resolved_count ?? null;
+    const f = finalBySku.get(c.sku);
+    const reviewedCount = f ? (f.final !== c.count || recount ? f.final : null) : (recount?.meta.resolved_count ?? null);
     return {
       ...c,
       reviewedCount,
@@ -96,6 +110,29 @@ export interface Candidate {
   /** Degrees on a 360° wheel, which is what people expect to read. */
   distanceDeg: number | null;
   inBand: boolean;
+  /** Appearance similarity (0-1), when the item was identified from photos. */
+  score?: number;
+}
+
+/**
+ * The SKUs a reviewer chooses between, best first, by the evidence the model
+ * actually used: its photo-match scores when it identified by appearance,
+ * hue distance when it identified by colour.
+ */
+export function candidatesFor(catalog: CatalogEntry[], review: Review): Candidate[] {
+  const scored = review.meta.candidates;
+  if (scored?.length) {
+    const bySku = new Map(catalog.map((e) => [e.sku, e]));
+    const top: Candidate[] = scored
+      .filter((c) => bySku.has(c.sku))
+      .map((c) => ({ entry: bySku.get(c.sku)!, distanceDeg: null, inBand: false, score: c.score }));
+    const seen = new Set(top.map((c) => c.entry.sku));
+    const rest = catalog
+      .filter((e) => !seen.has(e.sku))
+      .map((entry) => ({ entry, distanceDeg: null, inBand: false }));
+    return [...top, ...rest];
+  }
+  return rankCandidates(catalog, review.meta.hue, review.meta.sat);
 }
 
 /**

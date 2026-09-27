@@ -244,8 +244,9 @@ def approve(services: Services, adjustment_id: str, actor: dict[str, Any],
     needed = RULE_ROLE.get(adj["rule"] or "admin", "admin")
     if not role_at_least(actor["role"], needed):
         raise Forbidden(f"a difference worth {abs(adj['value']):.2f} needs {needed} approval")
+    # The old note said what it was waiting for; approval answers that.
     store.update_adjustment(adjustment_id, status="approved", decided_by=actor["user_id"],
-                            decided_at=time.time(), note=note or adj["note"])
+                            decided_at=time.time(), note=note or None)
     store.add_audit(adjustment_id, "adjustment_approved",
                     {"rule": adj["rule"], "delta": adj["delta"], "value": adj["value"],
                      "sku": adj["sku"], "location": adj["location"], "note": note},

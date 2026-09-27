@@ -1,4 +1,11 @@
-import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
+import {
+  forwardRef,
+  type ButtonHTMLAttributes,
+  type InputHTMLAttributes,
+  type ReactNode,
+  type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
+} from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { pct } from "@/lib/format";
@@ -247,3 +254,198 @@ export function Empty({
 export const Skeleton = ({ className }: { className?: string }) => (
   <div className={cn("skeleton", className)} aria-hidden />
 );
+
+/* ------------------------------------------------------------------ Forms */
+
+const FIELD =
+  "h-8 w-full min-w-0 rounded-md border border-line bg-bg px-2.5 text-[13px] text-fg placeholder:text-subtle " +
+  "focus:border-accent/60 focus:outline-none disabled:opacity-50 pointer-coarse:h-11";
+
+export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function Input(
+  { className, ...rest },
+  ref,
+) {
+  return <input ref={ref} className={cn(FIELD, className)} {...rest} />;
+});
+
+export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(function Select(
+  { className, children, ...rest },
+  ref,
+) {
+  return (
+    <select ref={ref} className={cn(FIELD, "cursor-pointer pr-7", className)} {...rest}>
+      {children}
+    </select>
+  );
+});
+
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(
+  function Textarea({ className, ...rest }, ref) {
+    return <textarea ref={ref} className={cn(FIELD, "h-auto min-h-20 py-2 font-mono text-xs", className)} {...rest} />;
+  },
+);
+
+export function Field({
+  label,
+  hint,
+  children,
+  className,
+}: {
+  label: string;
+  hint?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <label className={cn("block min-w-0", className)}>
+      <span className="mb-1 block text-xs text-muted">{label}</span>
+      {children}
+      {hint && <span className="mt-1 block text-[11px] text-subtle">{hint}</span>}
+    </label>
+  );
+}
+
+/* ------------------------------------------------------------ Page layout */
+
+export function PageHeader({
+  title,
+  icon: Icon,
+  children,
+  description,
+}: {
+  title: string;
+  icon?: LucideIcon;
+  description?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <header className="mb-4 flex flex-wrap items-start gap-3">
+      <div className="min-w-0">
+        <h1 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+          {Icon && <Icon size={18} className="text-subtle" aria-hidden />}
+          {title}
+        </h1>
+        {description && <p className="mt-1 max-w-2xl text-muted">{description}</p>}
+      </div>
+      {children && <div className="ml-auto flex flex-wrap items-center gap-2">{children}</div>}
+    </header>
+  );
+}
+
+export const Page = ({ children, wide }: { children: ReactNode; wide?: boolean }) => (
+  <div className={cn("mx-auto w-full p-4 sm:p-6", wide ? "max-w-7xl" : "max-w-5xl")}>{children}</div>
+);
+
+export function ErrorNote({ error, className }: { error: unknown; className?: string }) {
+  if (!error) return null;
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    <p role="alert" className={cn("rounded-md border border-bad/30 bg-bad/10 px-3 py-2 text-xs text-bad", className)}>
+      {message}
+    </p>
+  );
+}
+
+export function SegmentedTabs<T extends string>({
+  value,
+  options,
+  onChange,
+  label,
+}: {
+  value: T;
+  options: { value: T; label: string; count?: number }[];
+  onChange: (v: T) => void;
+  label: string;
+}) {
+  return (
+    <div role="tablist" aria-label={label} className="inline-flex flex-wrap gap-1 rounded-lg border border-line bg-surface p-1">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          role="tab"
+          aria-selected={value === o.value}
+          onClick={() => onChange(o.value)}
+          className={cn(
+            "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors pointer-coarse:h-10",
+            value === o.value ? "bg-raised text-fg ring-1 ring-inset ring-line-strong" : "text-muted hover:text-fg",
+          )}
+        >
+          {o.label}
+          {o.count != null && <span className="font-mono text-[10px] tabular text-subtle">{o.count}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A modal dialog: focus moves in, Escape and the backdrop close it. */
+export function Dialog({
+  open,
+  title,
+  onClose,
+  children,
+  wide,
+}: {
+  open: boolean;
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+  wide?: boolean;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+      onKeyDown={(e) => e.key === "Escape" && onClose()}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className={cn(
+          "max-h-[90dvh] w-full overflow-y-auto rounded-(--radius-card) border border-line bg-surface shadow-2xl",
+          wide ? "max-w-3xl" : "max-w-lg",
+        )}
+      >
+        <header className="flex items-center gap-2 border-b border-line px-4 py-3">
+          <h2 className="text-[14px] font-semibold">{title}</h2>
+          <button
+            autoFocus
+            onClick={onClose}
+            aria-label="Close"
+            className="ml-auto grid size-8 cursor-pointer place-items-center rounded-md text-muted hover:bg-hover hover:text-fg pointer-coarse:size-11"
+          >
+            ×
+          </button>
+        </header>
+        <div className="p-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/** Shared table styling: dense rows, sticky header, numeric columns right-aligned by the caller. */
+export const TABLE = "w-full border-collapse text-[13px] [&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:border-b [&_th]:border-line [&_th]:bg-surface [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:text-[11px] [&_th]:font-medium [&_th]:tracking-wider [&_th]:text-subtle [&_th]:uppercase [&_td]:border-b [&_td]:border-line/60 [&_td]:px-3 [&_td]:py-2 [&_tr:hover_td]:bg-hover/40";
+
+export function Stat({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: ReactNode; tone?: Tone }) {
+  return (
+    <div className="rounded-(--radius-card) border border-line bg-surface p-3">
+      <p className="text-[11px] tracking-wider text-subtle uppercase">{label}</p>
+      <p
+        className={cn(
+          "mt-1 font-mono text-xl font-semibold tabular",
+          tone === "bad" && "text-bad",
+          tone === "warn" && "text-warn",
+          tone === "ok" && "text-ok",
+          tone === "accent" && "text-accent",
+        )}
+      >
+        {value}
+      </p>
+      {sub && <p className="mt-0.5 text-xs text-muted">{sub}</p>}
+    </div>
+  );
+}
+
+export type { Tone };

@@ -2,15 +2,17 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { AlertCircle, FileVideo, FolderInput, Play, Upload, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, type RunKind } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { bytes, duration } from "@/lib/format";
 import { keys } from "@/lib/queries";
 import { navigate } from "@/lib/route";
 import { Button, Card, CardHeader, IconButton } from "@/components/ui";
+import { FileUnder, readTarget, type Target } from "./FileUnder";
 
-const ACCEPT = ["video/mp4", "video/quicktime"];
-const ACCEPT_EXT = /\.(mp4|mov|m4v)$/i;
+// WebM is what browsers and the phone app record; the rest are what cameras write.
+const ACCEPT = ["video/mp4", "video/quicktime", "video/webm", "video/x-matroska", "video/x-msvideo"];
+const ACCEPT_EXT = /\.(mp4|mov|m4v|webm|mkv|avi)$/i;
 
 interface Picked {
   file: File;
@@ -31,6 +33,7 @@ export function UploadPanel() {
   const [progress, setProgress] = useState<number | null>(null);
   const [serverPath, setServerPath] = useState("");
   const [showPath, setShowPath] = useState(false);
+  const [target, setTarget] = useState<Target>(readTarget);
 
   // Object URLs pin the whole file in memory until revoked. Keyed on the URL,
   // not the object: adding metadata to `picked` must not revoke a live preview.
@@ -41,7 +44,7 @@ export function UploadPanel() {
     setError(null);
     if (!file) return;
     if (!ACCEPT.includes(file.type) && !ACCEPT_EXT.test(file.name)) {
-      setError(`${file.name} isn't an MP4 or MOV video.`);
+      setError(`${file.name} isn't a video this server can count (MP4, MOV, WebM, MKV or AVI).`);
       return;
     }
     setPicked({ file, url: URL.createObjectURL(file), meta: null, previewFailed: false });
@@ -53,7 +56,14 @@ export function UploadPanel() {
     setProgress(0);
     abortRef.current = new AbortController();
     try {
-      const { run_id } = await api.upload(picked.file, setProgress, abortRef.current.signal);
+      const { run_id } = await api.upload(picked.file, setProgress, abortRef.current.signal, {
+        kind: target.kind as RunKind,
+        location: target.location,
+        receipt_id: target.kind === "receive" ? target.receipt_id : null,
+        task_id: target.kind === "recount" ? target.task_id : null,
+        walk_id: target.walk_id,
+        job_id: target.job_id,
+      });
       qc.invalidateQueries({ queryKey: keys.runs });
       navigate({ view: "run", runId: run_id, tab: "results", frame: null, review: false, sku: null });
     } catch (e) {
@@ -65,7 +75,7 @@ export function UploadPanel() {
   const startFromPath = async () => {
     setError(null);
     try {
-      const { run_id } = await api.startFromPath(serverPath.trim());
+      const { run_id } = await api.startFromPath(serverPath.trim(), target.location);
       qc.invalidateQueries({ queryKey: keys.runs });
       navigate({ view: "run", runId: run_id, tab: "results", frame: null, review: false, sku: null });
     } catch (e) {
@@ -132,13 +142,13 @@ export function UploadPanel() {
                   <span className="font-medium text-fg">Drop a video here</span> or{" "}
                   <span className="text-accent underline-offset-2 hover:underline">browse</span>
                 </span>
-                <span className="text-xs text-subtle">MP4 or MOV · one aisle per video works best</span>
+                <span className="text-xs text-subtle">MP4, MOV or WebM · one bay or aisle per video works best</span>
                 <input
                   ref={inputRef}
                   id={inputId}
                   type="file"
-                  aria-label="Choose an aisle video (MP4 or MOV)"
-                  accept="video/mp4,video/quicktime,.mp4,.mov,.m4v"
+                  aria-label="Choose an aisle video"
+                  accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm,.mkv,.avi"
                   className="sr-only"
                   onChange={(e) => pick(e.target.files?.[0])}
                 />
@@ -275,9 +285,11 @@ export function UploadPanel() {
         </div>
       </Card>
 
+      <FileUnder value={target} onChange={setTarget} />
+
       <ol className="mt-6 grid gap-3 text-xs text-muted sm:grid-cols-3">
         {[
-          ["Steady pace", "Motion blur is the main reason frames get dropped by the quality gate."],
+          ["Scan the bay label", "Film the QR label first: the count is filed under that bay and compared with its book stock."],
           ["Even light", "Very dark or blown-out frames are dropped and reported, not guessed at."],
           ["Check the queue", "Anything the model isn't sure about lands in Items to check, with the crop it saw."],
         ].map(([t, d], i) => (
