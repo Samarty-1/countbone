@@ -179,8 +179,8 @@ export function projections(l: Luma): { cols: Float32Array; rows: Float32Array }
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const v = data[y * w + x]!;
-      cols[x] += v;
-      rows[y] += v;
+      cols[x]! += v;
+      rows[y]! += v;
     }
   }
   let cm = 0;
