@@ -137,7 +137,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
                          "anyone on the network would be an admin")
     app = create_app(cfg, allow_origins=args.allow_origin or (), auth=not args.no_auth,
                      data_dir=args.data_dir)
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    # Behind a reverse proxy every request arrives from the proxy's address;
+    # only a proxy named here is believed about the real client (login
+    # throttling and the audit trail both depend on it).
+    forwarded = args.forwarded_allow_ips or os.environ.get("FORWARDED_ALLOW_IPS") or "127.0.0.1"
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info",
+                proxy_headers=True, forwarded_allow_ips=forwarded)
     return 0
 
 
@@ -272,6 +277,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     serve.add_argument("--no-auth", action="store_true",
                        help="single-user local mode: no sign-in (loopback host only)")
+    serve.add_argument(
+        "--forwarded-allow-ips", metavar="IPS",
+        help="proxies whose X-Forwarded-For is trusted, comma-separated, or '*' when "
+             "only the proxy can reach this port (default: $FORWARDED_ALLOW_IPS or 127.0.0.1)",
+    )
     serve.add_argument("--data-dir", help="keys, evidence packs and catalog photos "
                                           "(default: countbone-data beside the database)")
     common(serve)

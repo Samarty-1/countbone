@@ -26,6 +26,7 @@ def assign(services: Services, task_id: str, assignee: str | None, actor: dict[s
         raise Forbidden("assigning tasks needs a manager")
     if assignee is not None and store.get_user(assignee) is None:
         raise OpsError("no such user")
+    assign_check(services, task, assignee)
     fields: dict[str, Any] = {"assignee": assignee}
     if due_at is not None:
         fields["due_at"] = due_at
@@ -49,6 +50,9 @@ def complete(services: Services, task_id: str, count: int, actor: dict[str, Any]
     if actor is not None and task["assignee"] and task["assignee"] != actor["user_id"] \
             and not role_at_least(actor["role"], "manager"):
         raise Forbidden("this recount is assigned to someone else")
+    if actor is not None and task["kind"] == "recount" and _is_first_counter(services, task, actor) \
+            and reconcile.rules(services).get("independent_recount"):
+        raise Forbidden("a recount has to be done by someone other than the first counter")
     who = actor["username"] if actor else "system"
     result = {"recount": int(count), "by": who, "note": note, "run_id": run_id,
               "method": "video" if run_id else "manual"}
@@ -76,6 +80,17 @@ def complete(services: Services, task_id: str, count: int, actor: dict[str, Any]
     return store.get_task(task_id)  # type: ignore[return-value]
 
 
+def _is_first_counter(services: Services, task: dict[str, Any], actor: dict[str, Any]) -> bool:
+    run = services.store.get_run(task["run_id"]) if task.get("run_id") else None
+    return bool(run and run.get("created_by") and run["created_by"] == actor.get("user_id"))
+
+
+def assign_check(services: Services, task: dict[str, Any], assignee: str | None) -> None:
+    if assignee and task["kind"] == "recount" and reconcile.rules(services).get("independent_recount") \
+            and _is_first_counter(services, task, {"user_id": assignee}):
+        raise OpsError("assign the recount to someone other than the first counter")
+
+
 def complete_with_run(services: Services, run: dict[str, Any]) -> dict[str, Any] | None:
     """A recount video finished: close its task with the video's number."""
     task = services.store.get_task(run["task_id"])
@@ -89,8 +104,18 @@ def complete_with_run(services: Services, run: dict[str, Any]) -> dict[str, Any]
         return services.store.get_task(task["task_id"])
     qty = next((r["final"] for r in fc["rows"] if r["sku"] == task["sku"]), 0)
     creator = services.store.get_user(run["created_by"]) if run.get("created_by") else None
-    return complete(services, task["task_id"], qty, creator, note="recount video",
-                    run_id=run["run_id"])
+    try:
+        return complete(services, task["task_id"], qty, creator, note="recount video",
+                        run_id=run["run_id"])
+    except Forbidden as exc:
+        # The first counter filmed their own recount: the video is kept, but
+        # the task stays open for someone else.
+        services.store.update_task(task["task_id"], result={
+            "note": f"recount video not accepted: {exc}", "run_id": run["run_id"]})
+        services.store.add_audit(task["task_id"], "recount_refused",
+                                 {"run_id": run["run_id"], "reason": str(exc)},
+                                 actor=creator["username"] if creator else "system")
+        return services.store.get_task(task["task_id"])
 
 
 def cancel(services: Services, task_id: str, actor: dict[str, Any], note: str) -> dict[str, Any]:

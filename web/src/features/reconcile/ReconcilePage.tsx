@@ -125,6 +125,18 @@ function Rules({ editable }: { editable: boolean }) {
             <option value="auto">Post straight away</option>
           </Select>
         </Field>
+        <Field label="Who recounts">
+          <Select disabled={!editable} value={r.independent_recount ? "other" : "anyone"} onChange={(e) => set("independent_recount", e.target.value === "other")}>
+            <option value="other">Someone other than the first counter</option>
+            <option value="anyone">Anyone, including the first counter</option>
+          </Select>
+        </Field>
+        <Field label="Who approves">
+          <Select disabled={!editable} value={r.four_eyes ? "other" : "anyone"} onChange={(e) => set("four_eyes", e.target.value === "other")}>
+            <option value="other">Not whoever counted or recounted it</option>
+            <option value="anyone">Anyone with the role (one-person shop)</option>
+          </Select>
+        </Field>
       </div>
       {editable && (
         <div className="flex items-center gap-3">

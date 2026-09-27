@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import cv2
 import pytest
 
 from countbone.config import Config
@@ -163,3 +164,21 @@ def test_run_video_helper(demo_scene, tmp_path):
     result = run_video(demo_scene.path, cfg, run_id="run_fixed")
     assert result.run_id == "run_fixed"
     assert result.total > 0
+
+
+def test_implausible_container_rates_are_treated_as_unknown():
+    """Browser (MediaRecorder) WebM reports OpenCV's 1 kHz timebase and a
+    negative frame-count sentinel; neither may reach the run as fact."""
+    from countbone.stages.capture import _source_fps, _source_frames
+
+    class FakeCap:
+        def __init__(self, fps, frames):
+            self.v = {cv2.CAP_PROP_FPS: fps, cv2.CAP_PROP_FRAME_COUNT: frames}
+
+        def get(self, prop):
+            return self.v[prop]
+
+    assert _source_fps(FakeCap(1000.0, 0)) == 0.0
+    assert _source_frames(FakeCap(1000.0, -9.2e18)) == 0
+    assert _source_fps(FakeCap(29.97, 300)) == 29.97
+    assert _source_frames(FakeCap(29.97, 300)) == 300

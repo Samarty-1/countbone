@@ -13,7 +13,7 @@ changes is where the expected numbers come from and what happens after.
 |---|---|---|---|
 | **Count** | Operations / inventory control | Cycle counts by video. Adaptive sampling, photo-trained product recognition, review queue, recount tasks, walks that merge overlapping videos, printable bay labels | Phone app, dashboard *Counts, Walks, Recount tasks, Locations* |
 | **Catalog studio** | Inventory control | Teach products with ~5 photos; readiness and look-alike report; reviewers' corrections become examples | *Catalog studio* |
-| **Reconcile** | Finance | Differences as adjustments with a value; rules decide auto-approve / manager / finance; post to Shopify, NetSuite, SAP, a signed webhook, or CSV; period report | *Reconcile* |
+| **Reconcile** | Finance | Differences as adjustments with a value; rules decide auto-approve / manager / finance; separation of duties (independent recount, four-eyes approval); post to Shopify, NetSuite, SAP, a signed webhook, or CSV; period report | *Reconcile* |
 | **Receive** | Receiving / procurement | Count a delivery against its PO at the dock; shortages draft supplier claims with the video as evidence | *Receive* |
 | **Evidence** | Finance / legal / loss prevention | Ed25519-signed claim packs anyone can verify offline; tamper-evident audit chain | *Evidence & claims* |
 | **Shelf** | Retail merchandising | Empty facings with photos and planogram compliance from the same walk | Run → *Shelf & evidence* |

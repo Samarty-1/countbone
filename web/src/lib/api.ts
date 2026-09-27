@@ -363,6 +363,10 @@ export interface ReconcileRules {
   recount_due_hours: number;
   post_to: string | null;
   auto_post: boolean;
+  /** A recount is done by someone other than the first counter. */
+  independent_recount: boolean;
+  /** Nobody approves an adjustment they counted or recounted. */
+  four_eyes: boolean;
 }
 
 export interface ReceiptLine {

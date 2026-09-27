@@ -65,11 +65,13 @@ def read_labels(image) -> list[str]:
 def find_location(source: str, seconds: float = 8.0, stride: int = 3,
                   width: int = 1280) -> str | None:
     """The first location label in the opening seconds of a video."""
-    from ..stages.capture import _resize, open_source
+    from ..stages.capture import _resize, _source_fps, open_source
 
     cap = open_source(source)
     try:
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        # A browser WebM claims 1000 fps; believing it would read minutes of
+        # video looking for a label that belongs in the first seconds.
+        fps = _source_fps(cap) or 30.0
         limit = int(fps * seconds)
         for i in range(limit):
             ok, image = cap.read()

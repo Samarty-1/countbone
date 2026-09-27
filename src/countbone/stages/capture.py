@@ -31,18 +31,35 @@ def open_source(source: str | int) -> cv2.VideoCapture:
     return cap
 
 
+def _source_fps(cap: cv2.VideoCapture) -> float:
+    """The container's frame rate, or 0 when it does not really know.
+
+    Browser recordings (MediaRecorder WebM) carry no rate in their header,
+    and OpenCV then reports its 1 kHz timebase. No phone films at 1000 fps,
+    so anything implausible is treated as unknown rather than believed.
+    """
+    fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+    return fps if 0 < fps <= 240 else 0.0
+
+
+def _source_frames(cap: cv2.VideoCapture) -> int:
+    """Frame count, or 0 when unknown (the same WebMs report a negative sentinel)."""
+    frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    return frames if frames > 0 else 0
+
+
 def probe(source: str | int) -> dict:
     """Metadata without decoding the whole file."""
     cap = open_source(source)
     try:
-        fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
-        frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        fps = _source_fps(cap)
+        frames = _source_frames(cap)
         return {
             "fps": round(fps, 3),
             "frame_count": frames,
             "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
             "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-            "duration_s": round(frames / fps, 3) if fps > 0 else None,
+            "duration_s": round(frames / fps, 3) if fps > 0 and frames > 0 else None,
         }
     finally:
         cap.release()
@@ -220,7 +237,7 @@ def frames(
     back) for closed-loop sampling; without one the stride is fixed.
     """
     cap = open_source(source)
-    fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+    fps = _source_fps(cap)
     sampler = sampler or Sampler(CaptureConfig(**{**cfg.__dict__, "adaptive": False}))
     emitted = 0
     source_index = -1
