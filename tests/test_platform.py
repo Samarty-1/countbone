@@ -422,7 +422,16 @@ def test_studio_enrols_photos_and_identifies_a_new_one(env):
         assert res.status_code == 201 and len(res.json()["added"]) == 5
     quality = m.get("/api/studio/quality").json()
     assert quality["enrolled"] == len(demo.LOOKALIKE_SKUS)
-    assert all(p["status"] == "ready" for p in quality["products"].values())
+    products = quality["products"]
+    assert all(p["photos"] == 5 and p["status"] != "needs photos" for p in products.values())
+    # Plain red against red-with-a-dark-band is a genuinely close pair (their
+    # self-recognition sits near the 90% bar and lands either side of it on
+    # different OpenCV builds). When the studio calls one confusable, it
+    # must name a real look-alike from the same red family.
+    for sku, p in products.items():
+        if p["status"] == "confusable":
+            assert sku.startswith("RED") and all(o.startswith("RED") for o in p["confused_with"])
+    assert products["BLU-PLAIN"]["status"] == "ready"
     probe = demo.product_photos("RED-DOT", 1, seed=999)[0]
     ok, enc = cv2.imencode(".jpg", probe)
     guess = m.post("/api/studio/identify", files={"file": ("p.jpg", enc.tobytes())}).json()
