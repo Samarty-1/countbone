@@ -29,3 +29,11 @@ Thumbs.db
 web/node_modules/
 web/*.tsbuildinfo
 web/tsconfig.tsbuildinfo
+
+# deployment data: signing and secret keys, evidence packs, catalog photos (never commit)
+countbone-data/
+
+# mobile tooling
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/

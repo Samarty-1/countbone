@@ -1,0 +1,20 @@
+{$COUNTBONE_DOMAIN} {
+	encode zstd gzip
+	# Aisle videos are large; the phone app uploads in 4 MB chunks, the
+	# dashboard in one request.
+	request_body {
+		max_size 8GB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options DENY
+	}
+	reverse_proxy countbone:8000 {
+		transport http {
+			read_timeout 30m
+			write_timeout 30m
+		}
+	}
+}

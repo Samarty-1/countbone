@@ -1,0 +1,36 @@
+# A customer deployment: countbone behind Caddy, which gets and renews a TLS
+# certificate for COUNTBONE_DOMAIN automatically.
+#
+#   COUNTBONE_DOMAIN=counts.example.com docker compose up -d
+#   docker compose logs countbone | grep "setup code"   # first run only
+#
+# Then open https://counts.example.com and enter the setup code.
+services:
+  countbone:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - countbone-data:/data
+    environment:
+      # Optional: take the secret key from your secret manager instead of the
+      # generated file in /data/countbone-data/keys (see docs/DEPLOY.md).
+      - COUNTBONE_SECRET_KEY=${COUNTBONE_SECRET_KEY:-}
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [countbone]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - COUNTBONE_DOMAIN=${COUNTBONE_DOMAIN:?set COUNTBONE_DOMAIN to your hostname}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+
+volumes:
+  countbone-data:
+  caddy-data:

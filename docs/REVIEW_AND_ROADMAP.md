@@ -1,5 +1,37 @@
 # Countbone: health check, feature roadmap, ecosystem
 
+## Status, 2026-09-27 (branch `product-suite`, not merged)
+
+Everything in sections 3 and 4 below was built, tested and verified in a browser:
+
+| Item | Built as | Verified by |
+|---|---|---|
+| Lost tracking on fast pans | closed-loop sampler (back-fill, retry, adaptive stride), continuity score in confidence, scene-cut detection | 30/30 synthetic shelves exact (was 29/30 with the one error silent); tests |
+| Learned product identity | `appearance.py` photo index, self-calibrated per product, open set; barcodes when legible; Catalog studio | look-alike range: 0 errors on 10 shelves (colour: 448); unenrolled look-alike flagged |
+| Logins | scrypt, hashed tokens, cookie + CSRF header / Bearer / API keys, roles, throttling, console setup code | 22 platform tests; setup and sign-in in the browser |
+| Mobile app | Expo app: guided capture, QR scan, offline resumable queue, summary, swipe review, recounts | web preview end to end, including recording offline |
+| Flag misses by default | tolerance on by default, every miss flagged, zero rows for unseen expected SKUs | tests |
+| Bay QR labels | printable labels; read from the video to file or flag a run | labels decode; label-first video filed correctly |
+| Overlapping videos | walks merged by shelf-coordinate alignment with symmetric conflicts | 12/12 overlaps exact, 12/12 disjoint pairs untouched |
+| Offline, upload later | resumable chunked uploads, idempotent by recording id; durable job queue | tests; offline recording in the browser |
+| Mismatch → recount task | tasks with assignee and due date, closed by hand count or video | browser: task → recount → approval |
+| ERP connectors | Shopify (2026-07 GraphQL), NetSuite (REST + TBA), SAP S/4HANA (OData), signed webhook, CSV | mocked request-shape tests; OAuth signature matches oauthlib |
+| Receive | receipts from PO (typed, CSV, ERP), counted against lines, shortages draft claims | browser: short delivery → claim → pack |
+| Reconcile | valued adjustments, rules, approvals by role, posting, period report | browser and tests |
+| Evidence | Ed25519-signed claim packs with custody trail and verify.py; hash-chained audit | pack verifies; one changed byte fails |
+| Shelf | empty facings with photos, planogram compliance | every empty slot found |
+| Catalog studio, Count-as-a-Service | studio pages; sites, service jobs, consented COCO export | tests |
+
+Bugs found and fixed along the way are in the commit messages (OpenCV 5 `phaseCorrelate` mutating
+its inputs, red hue straddling 0/179 read as green, a false-merge path, label frames counted as
+stock, one photographed product disabling colour identification for all others, and more).
+
+Still open, and stated in [PRODUCT.md](PRODUCT.md): real-shelf accuracy (needs a trained detector),
+native-device testing of the phone app, live ERP sandbox runs, external timestamping of evidence,
+and multi-worker scale.
+
+---
+
 *Review of branch `dashboard-and-mobile`, 2026-09-27. Nothing in sections 3 and 4
 has been built; they are proposals awaiting a decision.*
 
