@@ -19,7 +19,7 @@ import {
 } from 'react-native-vision-camera';
 import { scheduleOnRN } from 'react-native-worklets';
 
-import { sampleFrame, type FrameSample } from '@/analysis/metrics.ts';
+import { sampleFrame, type FrameSample, type Rotation } from '@/analysis/metrics.ts';
 import { color, font, space } from '@/theme';
 import type { CameraFeedHandle, CameraFeedProps, Recording } from './types';
 
@@ -50,9 +50,18 @@ export const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(function
         const y = planes[0];
         if (y) {
           const buf = new Uint8Array(y.getPixelBuffer());
-          // Edge boxes are the costly part: every other frame is plenty.
-          const withBoxes = Math.floor(frame.timestamp * 10) % 2 === 0;
-          const sample = sampleFrame(buf, y.width, y.height, y.bytesPerRow, 1, Date.now() / 1000, withBoxes);
+          const now = Date.now();
+          // Edge boxes are the costly part: every other 100 ms is plenty (the
+          // engine carries them along with the motion in between). Wall clock,
+          // not frame.timestamp, whose unit differs between iOS and Android.
+          const withBoxes = Math.floor(now / 100) % 2 === 0;
+          // The sensor delivers landscape buffers to a portrait phone; the
+          // metrics must see the shelf upright, or walking along it reads as
+          // moving up and down. Frame.orientation uses EXIF semantics: "right"
+          // data displays after a clockwise quarter turn.
+          const o = frame.orientation;
+          const rotation: Rotation = o === 'right' ? 90 : o === 'down' ? 180 : o === 'left' ? 270 : 0;
+          const sample = sampleFrame(buf, y.width, y.height, y.bytesPerRow, 1, now / 1000, withBoxes, rotation);
           scheduleOnRN(post, sample);
         }
       } finally {

@@ -304,5 +304,6 @@ export const api = {
     if (res.status === 401) await setToken(null);
     throw new ApiError(res.status, `upload chunk failed (HTTP ${res.status})`);
   },
-  completeUpload: (id: string) => request<{ run_id: string }>(`/api/uploads/${encodeURIComponent(id)}/complete`, json('POST'), 60000),
+  completeUpload: (id: string, sha256?: string) =>
+    request<{ run_id: string }>(`/api/uploads/${encodeURIComponent(id)}/complete`, json('POST', sha256 ? { sha256 } : undefined), 60000),
 };

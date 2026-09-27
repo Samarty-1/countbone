@@ -4,7 +4,7 @@ import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { api, type RunSummary } from '@/api/client';
-import { discard, pump, retry, type QueueItem } from '@/api/uploadQueue';
+import { discard, pump, retry, waitsForSomeoneElse, type QueueItem } from '@/api/uploadQueue';
 import { Badge, Button, Card, Empty, Row, SectionLabel, Title } from '@/components/ui';
 import { useQueue } from '@/state/useQueue';
 import { color, font, radius, space } from '@/theme';
@@ -37,7 +37,13 @@ function Item({ item }: { item: QueueItem }) {
           <View style={[styles.fill, { width: `${Math.round(frac * 100)}%` }]} />
         </View>
       )}
-      {item.error && item.state !== 'done' ? <Text style={styles.err}>{item.error}</Text> : null}
+      {item.state === 'waiting' && waitsForSomeoneElse(item) ? (
+        <Text style={styles.err}>
+          Filmed by {item.ownerName ?? 'someone else'}: it uploads when they sign in on this phone.
+        </Text>
+      ) : item.error && item.state !== 'done' ? (
+        <Text style={styles.err}>{item.error}</Text>
+      ) : null}
       {item.state === 'failed' && (
         <View style={{ flexDirection: 'row', gap: space.sm }}>
           <View style={{ flex: 1 }}>
