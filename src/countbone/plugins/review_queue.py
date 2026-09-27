@@ -150,17 +150,32 @@ class ReviewQueue(Plugin):
         del pending[self.max_items :]
 
     def _one_per_track(self, candidates: list[dict[str, Any]], index) -> list[dict[str, Any]]:
-        """Ask about each object once: its least confident sighting."""
-        seen: set[int] = set()
+        """Ask about each object once.
+
+        The object's least confident sighting ranks it (how doubtful it is),
+        but the picture shown is its most complete view: the largest box.
+        The least confident sighting is often a partial or odd detection
+        (a label patch, an object half out of frame), and a reviewer shown
+        that would be deciding about the wrong thing.
+        """
+        by_track: dict[int, list[dict[str, Any]]] = {}
         out = []
-        for cand in sorted(candidates, key=lambda c: c["confidence"]):
+        for cand in candidates:
             tid = cand["item"].track_id
-            if tid is not None:
-                if tid in seen:
-                    continue
-                seen.add(tid)
-            out.append(cand)
-        return out
+            if tid is None:
+                out.append(cand)
+            else:
+                by_track.setdefault(tid, []).append(cand)
+
+        def area(c: dict[str, Any]) -> float:
+            x1, y1, x2, y2 = c["bbox"]
+            return (x2 - x1) * (y2 - y1)
+
+        for group in by_track.values():
+            shown = dict(max(group, key=area))
+            shown["confidence"] = min(c["confidence"] for c in group)
+            out.append(shown)
+        return sorted(out, key=lambda c: c["confidence"])
 
     def on_counts(self, ctx: RunContext, result: CountResult) -> CountResult:
         index: dict[int, tuple[str, int]] = ctx.state.get("review_track_index", {})

@@ -152,9 +152,9 @@ class ShelfCheck(Plugin):
         views.append((frame.source_index, float(ox), float(oy), w, h, tids))
 
     def on_counts(self, ctx: RunContext, result: CountResult) -> CountResult:
+        # Every counted object fills its facing, named or not: leaving out the
+        # unidentified ones reported their places as empty shelf.
         objects = result.meta.get("tracks_world") or []
-        unknown = ctx.config.identify.unknown_sku
-        objects = [o for o in objects if o["sku"] != unknown] or objects
         gaps = find_gaps(objects, self.min_fill)
         report: dict[str, Any] = {
             "rows": len(rows_of(objects)),

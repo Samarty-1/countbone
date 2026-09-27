@@ -198,6 +198,19 @@ def test_every_empty_slot_is_found(media, tmp_path):
     assert (tmp_path / "runs" / result.run_id / report["gaps"][0]["photo"]).is_file()
 
 
+def test_an_unidentified_object_still_fills_its_facing(media, tmp_path):
+    """Regression: objects nobody could name were left out of the shelf check,
+    so their places were reported as empty shelf."""
+    import json
+
+    scene = demo.make_demo_video(media / "gaps_unknown.webm", seed=21)
+    # A catalog that knows only blue: every other carton is unidentified.
+    catalog = Catalog([SkuEntry("SKU-BLU", "Blue", hue=(95, 130))])
+    result = Pipeline(_cfg(tmp_path), catalog_provider=lambda: catalog).run(scene.path)
+    report = json.loads((tmp_path / "runs" / result.run_id / "shelf.json").read_text())
+    assert report["missing_facings"] == len(scene.empty_slots)
+
+
 def test_gap_finder_on_a_hand_made_row():
     row = [{"sku": "A", "x": x, "y": 50, "w": 100, "h": 100} for x in (50, 200, 500, 650)]
     other = [{"sku": "B", "x": x, "y": 250, "w": 100, "h": 100} for x in (50, 200, 350, 500, 650)]

@@ -480,6 +480,8 @@ export interface ProductQuality {
 export interface StudioQuality {
   products: Record<string, ProductQuality>;
   calibration: Record<string, unknown>;
+  /** Colour-only products a photographed look-alike shadows (they go to review until photographed). */
+  colour_conflicts: { sku: string; label: string; shares_colour_with: string[] }[];
   enrolled: number;
 }
 

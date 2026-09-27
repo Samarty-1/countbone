@@ -25,8 +25,55 @@ MAX_PHOTO_BYTES = 12 * 1024 * 1024
 SKU_CHARS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.:/ ")
 
 
+def estimate_colour(images: list[np.ndarray]) -> dict[str, Any] | None:
+    """A product's colour band, learned from its photos.
+
+    Colour identification still covers the products nobody photographed,
+    but only where no photographed product shares their colour (see
+    identify.AppearanceIdentifier). A photographed product with no known
+    colour would block colour identification for the whole catalog, so its
+    colour is measured here: the circular mean hue of the product (vivid
+    pixels only), as a band of +-12, or achromatic for a grey/black/white box.
+    """
+    from ..stages.identify import circular_hue
+
+    hues, sats = [], []
+    for img in images:
+        crop = appearance.product_crop(img)
+        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        sats.append(float(np.median(hsv[:, :, 1])))
+        vivid = hsv[hsv[:, :, 1] >= 60]
+        if len(vivid) >= 50:
+            hues.append(circular_hue(vivid.reshape(-1, 1, 3)))
+    if not sats:
+        return None
+    if float(np.median(sats)) < 60 or not hues:
+        return {"achromatic": True, "hue": None}
+    angles = np.asarray(hues) * (2 * np.pi / 180)
+    centre = float(np.mod(np.arctan2(np.sin(angles).mean(), np.cos(angles).mean()) * 180 / (2 * np.pi), 180))
+    return {"achromatic": False, "hue": [int(round(centre - 12)) % 180, int(round(centre + 12)) % 180]}
+
+
+def learn_colour(store, sku: str) -> None:
+    """Set a Studio product's colour band from its photos, if it has none."""
+    row = store.get_sku(sku)
+    if row is None or row.get("hue") or row.get("achromatic"):
+        return
+    images = [img for p in store.list_photos(sku) if p["source"] == "upload"
+              and (img := cv2.imread(p["path"])) is not None]
+    if not images:
+        return
+    colour = estimate_colour(images)
+    if colour:
+        store.upsert_sku(sku, {"hue": colour["hue"], "achromatic": int(colour["achromatic"])}, None)
+
+
 def load_catalog(base: Catalog, store) -> Catalog:
     """The configured catalog, plus Studio products and every enrolled photo."""
+    # Products photographed before colours were learned get theirs now, once.
+    for row in store.list_skus():
+        if row["photos"] and not row.get("hue") and not row.get("achromatic"):
+            learn_colour(store, row["sku"])
     studio = [
         SkuEntry(
             sku=r["sku"], label=r["label"] or r["sku"],
@@ -112,6 +159,8 @@ def add_photo(services: Services, sku: str, data: bytes, actor: dict[str, Any] |
     store.add_audit(f"sku:{sku}", "sku_photo_added",
                     {"photo_id": photo_id, "source": source, "run_id": run_id,
                      "review_id": review_id}, actor=actor["username"] if actor else "system")
+    if source == "upload":
+        learn_colour(store, sku)
     return store.get_photo(photo_id)  # type: ignore[return-value]
 
 
@@ -213,5 +262,17 @@ def quality(services: Services) -> dict[str, Any]:
             "nearest_similarity": None if nearest[1] is None else round(nearest[1], 4),
             "accept_threshold": round(index.accept_for(sku), 4), "status": status,
         }
-    return {"products": per, "calibration": index.calibration,
+    # Colour-only products a photographed look-alike now shadows: sightings
+    # of these become "unknown" until they are photographed too.
+    from ..stages.identify import _bands_overlap
+
+    enrolled = [e for e in catalog.entries if e.sku in set(index.skus)]
+    conflicts = []
+    for e in catalog.entries:
+        if e.sku in set(index.skus):
+            continue
+        blockers = [o.sku for o in enrolled if _bands_overlap(e, o)]
+        if blockers:
+            conflicts.append({"sku": e.sku, "label": e.label, "shares_colour_with": blockers})
+    return {"products": per, "calibration": index.calibration, "colour_conflicts": conflicts,
             "enrolled": len(index.skus), "generated_at": time.time()}

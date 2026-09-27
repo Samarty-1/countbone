@@ -241,6 +241,23 @@ export function StudioPage({ sku }: { sku: string | null }) {
       </PageHeader>
       <ErrorNote error={error} className="mb-3" />
       {notice && <p className="mb-3 text-xs text-ok">{notice}</p>}
+      {!!quality.data?.colour_conflicts.length && (
+        <div role="status" className="mb-4 rounded-(--radius-card) border border-warn/30 bg-warn/[0.06] px-4 py-3 text-xs">
+          <p className="mb-1 font-medium text-warn">Photograph these too</p>
+          <p className="mb-2 text-muted">
+            They are recognised by colour only, and a photographed product shares their colour, so the counter can no
+            longer tell them apart: their sightings go to review until they have photos.
+          </p>
+          <ul className="space-y-0.5">
+            {quality.data.colour_conflicts.map((c) => (
+              <li key={c.sku}>
+                <a href={pageHref("studio", c.sku)} className="font-mono text-accent hover:underline">{c.sku}</a>
+                <span className="text-muted"> shares its colour with {c.shares_colour_with.join(", ")}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="mb-4 grid gap-4 lg:grid-cols-[1fr_380px]">
         <div className="grid grid-cols-3 gap-3">
           <Stat label="Products" value={products.length} />

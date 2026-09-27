@@ -5,10 +5,13 @@
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~57.0.25",
+    "expo-camera": "~57.0.5",
     "expo-constants": "~57.0.19",
+    "expo-file-system": "~57.0.7",
     "expo-font": "~57.0.4",
     "expo-haptics": "~57.0.3",
     "expo-linking": "~57.0.11",
+    "expo-network": "~57.0.2",
     "expo-router": "~57.0.23",
     "expo-sensors": "~57.0.3",
     "expo-status-bar": "~57.0.1",
@@ -30,6 +33,8 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "eslint": "^9.0.0",
+    "eslint-config-expo": "~57.0.2",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -38,7 +43,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test": "node --no-warnings --test src/analysis/analysis.test.ts"
+    "test": "node --no-warnings --test src/analysis/analysis.test.ts",
+    "lint": "expo lint"
   },
   "private": true
 }

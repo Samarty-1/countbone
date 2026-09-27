@@ -74,8 +74,10 @@ class CatalogCache:
         store = self.services.store
         v = store._one("SELECT COUNT(*) AS n, MAX(id) AS m FROM sku_vectors") or {}
         s = store._one("SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(label) + unit_value * 100 "
-                       "+ archived * 7 + LENGTH(COALESCE(barcodes, ''))), 0) AS h FROM skus") or {}
-        return (v.get("n"), v.get("m"), s.get("n"), s.get("h"))
+                       "+ archived * 7 + achromatic * 3 + LENGTH(COALESCE(barcodes, '')) "
+                       "+ LENGTH(COALESCE(hue, ''))), 0) AS h, "
+                       "GROUP_CONCAT(COALESCE(hue, '-'), '|') AS hues FROM skus") or {}
+        return (v.get("n"), v.get("m"), s.get("n"), s.get("h"), s.get("hues"))
 
     def __call__(self) -> Catalog:
         key = self._fingerprint()

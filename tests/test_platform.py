@@ -434,6 +434,31 @@ def test_studio_enrols_photos_and_identifies_a_new_one(env):
     assert bad.status_code == 400
 
 
+def test_photographing_one_product_does_not_break_colour_counting(env, scene):
+    """Regression (found in the phone preview): enrolling a single product by
+    photo, with no colour band, turned every colour-identified product into
+    UNKNOWN. Its colour is now learned from its photos, so only the products
+    it actually resembles are held back, and the studio names them."""
+    m, store = env["manager"], env["store"]
+    m.post("/api/studio/skus", json={"sku": "RED-DOT", "label": "Red carton, black dot"})
+    files = []
+    for j, photo in enumerate(demo.product_photos("RED-DOT", 5, seed=7)):
+        ok, enc = cv2.imencode(".jpg", photo)
+        files.append(("files", (f"d{j}.jpg", enc.tobytes(), "image/jpeg")))
+    m.post("/api/studio/skus/RED-DOT/photos", files=files)
+    assert store.get_sku("RED-DOT")["hue"] is not None  # learned, not left blank
+
+    run = wait_run(m, upload(m, scene.path))
+    counts = {c["sku"]: c["count"] for c in run["counts"]}
+    for sku in ("SKU-BLU", "SKU-GRN", "SKU-YEL"):
+        assert counts.get(sku) == scene.truth[sku], (sku, counts)
+    # Plain red cartons are not filed as the red look-alike...
+    assert counts.get("RED-DOT", 0) == 0
+    # ...and the studio says why they went to review.
+    conflicts = m.get("/api/studio/quality").json()["colour_conflicts"]
+    assert any(c["sku"] == "SKU-RED" and "RED-DOT" in c["shares_colour_with"] for c in conflicts)
+
+
 # -- service jobs and the data engine --------------------------------------------------------------
 def test_consented_service_runs_export_as_coco(env, scene):
     m, c, store = env["manager"], env["counter"], env["store"]

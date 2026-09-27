@@ -53,7 +53,10 @@ function blur(img: Uint8Array, r: number): Uint8Array {
       let n = 0;
       for (let d = -r; d <= r; d++) {
         const xx = x + d;
-        if (xx >= 0 && xx < W) (s += img[y * W + xx]!), n++;
+        if (xx >= 0 && xx < W) {
+          s += img[y * W + xx]!;
+          n++;
+        }
       }
       tmp[y * W + x] = s / n;
     }
@@ -64,7 +67,10 @@ function blur(img: Uint8Array, r: number): Uint8Array {
       let n = 0;
       for (let d = -r; d <= r; d++) {
         const yy = y + d;
-        if (yy >= 0 && yy < H) (s += tmp[yy * W + x]!), n++;
+        if (yy >= 0 && yy < H) {
+          s += tmp[yy * W + x]!;
+          n++;
+        }
       }
       out[y * W + x] = s / n;
     }
