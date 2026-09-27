@@ -125,10 +125,13 @@ def _load_builtins() -> None:
     from . import (  # noqa: F401  (imported for the side effect of registering)
         audit_pack,
         confidence,
+        contact_sheet,
         exception_report,
+        location_tag,
         multiframe,
         quality_gate,
         review_queue,
+        shelf_check,
         tolerance,
     )
 

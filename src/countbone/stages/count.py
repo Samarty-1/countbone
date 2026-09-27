@@ -104,6 +104,11 @@ class Tracker:
             self.tracks.append(track)
             self._attach(track, item, frame_index)
 
+    @property
+    def offset(self) -> tuple[float, float]:
+        """How far the scene has slid since the first frame (world = image - offset)."""
+        return self._cum
+
     def observe_motion(self, motion: dict[str, float] | None) -> None:
         """Add one frame's camera displacement to the running total.
 

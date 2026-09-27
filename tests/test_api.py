@@ -14,12 +14,28 @@ from fastapi.testclient import TestClient  # noqa: E402
 from countbone.api.app import create_app  # noqa: E402
 from countbone.store.db import Store  # noqa: E402
 
+ADMIN_PASSWORD = "correct horse battery"
+
+
+def signed_in(app, store, username="admin", role="admin", password=ADMIN_PASSWORD):
+    """A TestClient signed in as a new user of `role` (Bearer, like the phone app)."""
+    from countbone.security import hash_password
+
+    if store.user_by_username(username) is None:
+        store.create_user(username, hash_password(password), role, username.title())
+    c = TestClient(app)
+    token = c.post("/api/auth/login", json={"username": username, "password": password}).json()["token"]
+    c.headers["Authorization"] = f"Bearer {token}"
+    return c
+
 
 @pytest.fixture
 def client(config, tmp_path):
     store = Store(tmp_path / "api.db")
-    with TestClient(create_app(config, store=store)) as c:
+    app = create_app(config, store=store, data_dir=tmp_path / "data")
+    with signed_in(app, store) as c:
         c.store = store
+        c.app_ = app
         yield c
     store.close()
 
@@ -274,7 +290,8 @@ def test_cors_is_off_unless_origins_are_named(client, config, tmp_path):
     assert "access-control-allow-origin" not in client.get("/api/health", headers=origin).headers
 
     store = Store(tmp_path / "cors.db")
-    with TestClient(create_app(config, store=store, allow_origins=["http://localhost:8081"])) as c:
+    with TestClient(create_app(config, store=store, allow_origins=["http://localhost:8081"],
+                               data_dir=tmp_path / "cors-data")) as c:
         allowed = c.get("/api/health", headers=origin).headers
         other = c.get("/api/health", headers={"Origin": "http://evil.example"}).headers
     store.close()

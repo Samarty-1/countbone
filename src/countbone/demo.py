@@ -180,6 +180,8 @@ def make_demo_video(
     palette: str = "primary",
     window: tuple[float, float] = (0.0, 1.0),
     shelf_views: float = 2.2,
+    label: str | None = None,
+    label_seconds: float = 0.75,
 ) -> DemoScene:
     """Render a pan across a synthetic shelf. Returns the ground truth with it.
 
@@ -213,6 +215,10 @@ def make_demo_video(
 
     writer, out_path = _open_writer(out_path, fps, view_w, view_h)
     try:
+        if label:
+            # The operator films the bay's label first, then pans the shelf.
+            for frame in _label_frames(label, view_w, view_h, int(fps * label_seconds)):
+                writer.write(frame)
         for i in range(frames):
             # ease-in-out pan: a human hand does not move linearly
             t = i / max(frames - 1, 1)
@@ -235,6 +241,25 @@ def make_demo_video(
         empty_slots=empty,
         view_x=(seen_lo, seen_hi),
     )
+
+
+def _label_frames(code: str, w: int, h: int, n: int) -> list[np.ndarray]:
+    """A printed bay label on a wall, held steady for n frames."""
+    import segno
+
+    from .plugins.location_tag import label_payload
+
+    # micro=False: segno picks Micro QR for short payloads, which OpenCV cannot read.
+    qr = segno.make(label_payload(code), error="m", micro=False)
+    matrix = np.array([[0 if dark else 255 for dark in row] for row in qr.matrix], np.uint8)
+    size = min(h, w) // 2
+    img = cv2.resize(np.pad(matrix, 4, constant_values=255), (size, size),
+                     interpolation=cv2.INTER_NEAREST)
+    wall = np.full((h, w, 3), 200, np.uint8)
+    y, x = (h - size) // 2, (w - size) // 2
+    wall[y : y + size, x : x + size] = img[:, :, None]
+    cv2.putText(wall, code, (x, y + size + 40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (20, 20, 20), 3)
+    return [wall.copy() for _ in range(n)]
 
 
 @contextlib.contextmanager

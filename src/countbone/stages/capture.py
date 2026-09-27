@@ -48,6 +48,25 @@ def probe(source: str | int) -> dict:
         cap.release()
 
 
+def read_frame(source: str, source_index: int, resize_width: int | None = None) -> np.ndarray | None:
+    """One frame by its index in the source, at pipeline resolution.
+
+    For after-the-fact evidence (a shelf gap, a dataset image): the pipeline
+    keeps no pixels once a frame has gone past, and the source is on disk.
+    Reads forward rather than seeking, because frame-accurate seeking is
+    unreliable across codecs and a wrong frame would be wrong evidence.
+    """
+    cap = open_source(source)
+    try:
+        for _ in range(source_index + 1):
+            ok, image = cap.read()
+            if not ok:
+                return None
+        return _resize(image, resize_width)
+    finally:
+        cap.release()
+
+
 def _timestamp(cap: cv2.VideoCapture, source_index: int, fps: float) -> float:
     """When the frame just read is shown, in seconds from the start.
 

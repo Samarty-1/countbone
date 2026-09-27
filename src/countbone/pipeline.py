@@ -223,6 +223,7 @@ class Pipeline:
             if needs_per_frame:
                 per_frame[frame.index] = items
             tracker.update(frame.index, items, frame.meta.get("motion"))  # 5. Count
+            frame.meta["offset"] = tracker.offset
             # Track ids are known now and the pixels are still in hand.
             plugin_base.fire(self.plugins, "on_frame_tracked", ctx, frame, items)
             continuity.kept(box_px())

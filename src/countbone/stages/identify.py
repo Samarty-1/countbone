@@ -7,7 +7,7 @@ from typing import Protocol
 import cv2
 import numpy as np
 
-from ..catalog import Catalog
+from ..catalog import Catalog, SkuEntry
 from ..config import IdentifyConfig
 from ..types import Detection, Frame, Item
 
@@ -32,6 +32,21 @@ def crop(frame: Frame, det: Detection, inset: float = 0.0) -> np.ndarray:
     return frame.image[yi1:yi2, xi1:xi2]
 
 
+def circular_hue(hsv: np.ndarray) -> float:
+    """The typical hue of a patch, on OpenCV's 0-179 wheel.
+
+    Hue wraps: 0 and 179 are both red. A median over a red patch whose
+    pixels straddle the wrap (sensor noise decides which side each lands on)
+    averages 0s and 179s into a green or cyan hue, which misfiled real red
+    cartons as green. The mean direction on the circle, weighted by
+    saturation so grey pixels (whose hue is noise) barely count, does not.
+    """
+    h = hsv[:, :, 0].astype(np.float64).ravel() * (2.0 * np.pi / 180.0)
+    w = hsv[:, :, 1].astype(np.float64).ravel() + 1.0
+    angle = np.arctan2(float((w * np.sin(h)).sum()), float((w * np.cos(h)).sum()))
+    return float(np.mod(angle * 180.0 / (2.0 * np.pi), 180.0))
+
+
 class ColorIdentifier:
     """Match the dominant hue of a detection against the catalog.
 
@@ -50,7 +65,7 @@ class ColorIdentifier:
         for det in detections:
             patch = crop(frame, det, inset=0.18)
             hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
-            hue = float(np.median(hsv[:, :, 0]))
+            hue = circular_hue(hsv)
             sat = float(np.median(hsv[:, :, 1]))
             val = float(np.median(hsv[:, :, 2]))
 
@@ -149,6 +164,22 @@ class FixtureIdentifier:
         ]
 
 
+def _bands_overlap(a: SkuEntry, b: SkuEntry) -> bool:
+    """Could a sighting of `b` fall in `a`'s colour band?"""
+    if a.achromatic or b.achromatic:
+        return a.achromatic and b.achromatic
+    if a.hue is None or b.hue is None:
+        return True
+    return any(a.matches_hue(h) for h in _band_points(b)) or any(
+        b.matches_hue(h) for h in _band_points(a))
+
+
+def _band_points(e: SkuEntry) -> list[float]:
+    lo, hi = e.hue  # type: ignore[misc]
+    span = (hi - lo) if lo <= hi else (180 - lo + hi)
+    return [(lo + span * k / 8) % 180 for k in range(9)]
+
+
 class BarcodeReader:
     """Read an EAN/UPC off a sighting when one is legible.
 
@@ -194,12 +225,21 @@ class AppearanceIdentifier:
         self._embed = appearance.embed
         self._confidence = appearance.confidence
         self.barcodes = BarcodeReader(catalog)
-        enrolled = set(self.index.skus)
-        # Colour covers only products nobody has photographed: colour-matching
-        # an enrolled look-alike would undo what the photos taught.
-        self.colour = ColorIdentifier(
-            cfg, Catalog([e for e in catalog.entries if e.sku not in enrolled])
-        )
+        enrolled = [e for e in catalog.entries if e.sku in set(self.index.skus)]
+        # Colour may vouch only for products nobody photographed, and only
+        # when no photographed product shares their colour: a red sighting the
+        # photos rejected must become "unknown", not the one red product that
+        # happens to have no photos. If any photographed product has no colour
+        # band, its colour is unknown and colour vouches for nothing.
+        if any(e.hue is None and not e.achromatic for e in enrolled):
+            fallback: list[SkuEntry] = []
+        else:
+            fallback = [
+                e for e in catalog.entries
+                if e.sku not in self.index.skus
+                and not any(_bands_overlap(e, other) for other in enrolled)
+            ]
+        self.colour = ColorIdentifier(cfg, Catalog(fallback))
 
     def identify(self, frame: Frame, detections: list[Detection]) -> list[Item]:
         items: list[Item] = []

@@ -85,13 +85,16 @@ class PluginSpec:
 
 DEFAULT_PLUGINS = [
     PluginSpec("quality_gate"),
+    PluginSpec("location_tag"),
     PluginSpec("multiframe"),
     PluginSpec("confidence"),
     # On by default: it only acts when a count has an expected number, and a
     # count that misses its expected number must never say "no review needed".
     PluginSpec("tolerance"),
+    PluginSpec("shelf_check"),
     PluginSpec("review_queue"),
     PluginSpec("exception_report"),
+    PluginSpec("contact_sheet"),
     PluginSpec("audit_pack"),
 ]
 
