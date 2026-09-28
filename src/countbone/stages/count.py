@@ -45,6 +45,7 @@ class Tracker:
         self._last_cum: dict[int, tuple[float, float]] = {}
         self._cum = (0.0, 0.0)  # running camera displacement since the first frame
         self._next_id = 1
+        self._cut_at = -1  # frame index of the last scene cut
 
     def update(
         self, frame_index: int, items: list[Item], motion: dict[str, float] | None = None
@@ -56,11 +57,14 @@ class Tracker:
         forward by that displacement is what keeps one physical carton as one
         track instead of one per frame.
         """
-        if motion and motion.get("estimated"):
-            self._cum = (self._cum[0] + motion["dx"], self._cum[1] + motion["dy"])
+        self.observe_motion(motion)
+        if motion and motion.get("cut"):
+            # Nothing continues across a scene cut (see motion.py).
+            self._cut_at = frame_index
 
         live = [
-            t for t in self.tracks if frame_index - t.last_frame <= self.max_gap + 1
+            t for t in self.tracks
+            if frame_index - t.last_frame <= self.max_gap + 1 and t.last_frame >= self._cut_at
         ]
         unmatched = list(items)
         # Highest-overlap pairs first, so a crowded shelf does not get stolen
@@ -105,6 +109,22 @@ class Tracker:
             self.tracks.append(track)
             self._attach(track, item, frame_index)
 
+    @property
+    def offset(self) -> tuple[float, float]:
+        """How far the scene has slid since the first frame (world = image - offset)."""
+        return self._cum
+
+    def observe_motion(self, motion: dict[str, float] | None) -> None:
+        """Add one frame's camera displacement to the running total.
+
+        Called for every frame, including ones the quality gate drops: the
+        camera moved during a dropped frame too. Skip that, and every track's
+        prediction lags by a whole frame of pan, which at walking speed is
+        enough to split each object in view into two tracks and count it twice.
+        """
+        if motion and motion.get("estimated"):
+            self._cum = (self._cum[0] + motion["dx"], self._cum[1] + motion["dy"])
+
     def _predict(
         self, track: Track, frame_index: int, motion: dict[str, float] | None
     ) -> tuple[float, float, float, float]:
@@ -117,6 +137,16 @@ class Tracker:
 
     def _attach(self, track: Track, item: Item, frame_index: int) -> None:
         item.track_id = track.track_id
+        # Where the object sits on the shelf, in the first frame's pixel
+        # coordinates: its image position minus how far the scene has slid.
+        # Stable across the whole walk, so cross-video merging and shelf-gap
+        # checks can reason about the shelf rather than the screen.
+        cx, cy = item.detection.centroid
+        x1, y1, x2, y2 = item.detection.bbox
+        item.meta["world"] = (
+            round(cx - self._cum[0], 1), round(cy - self._cum[1], 1),
+            round(x2 - x1, 1), round(y2 - y1, 1),
+        )
         track.items.append(item)
         track.last_frame = frame_index
         # A track's SKU is the majority vote of its sightings, not the first
@@ -124,6 +154,17 @@ class Tracker:
         track.sku = Counter(i.sku for i in track.items).most_common(1)[0][0]
         self._last_box[track.track_id] = item.detection.bbox
         self._last_cum[track.track_id] = self._cum
+
+
+def track_world(track: Track) -> dict[str, float] | None:
+    """A track's shelf position and size: the median over its sightings."""
+    pts = [i.meta["world"] for i in track.items if "world" in i.meta]
+    if not pts:
+        return None
+    arr = np.asarray(pts, dtype=np.float64)
+    x, y, w, h = np.median(arr, axis=0)
+    return {"x": round(float(x), 1), "y": round(float(y), 1),
+            "w": round(float(w), 1), "h": round(float(h), 1)}
 
 
 def _track_confidence(track: Track, min_hits: int) -> float:
@@ -141,8 +182,23 @@ def _track_confidence(track: Track, min_hits: int) -> float:
     ))
 
 
+def expected_for(sku: str, cfg: CountConfig, catalog: Catalog,
+                 override: dict[str, int] | None) -> int | None:
+    """The number this SKU should have come to.
+
+    A per-run expectation (a location's book quantity, a purchase order's
+    lines) replaces the global ones outright: a bay's stock has nothing to
+    do with the catalog-wide default.
+    """
+    if override is not None:
+        return override.get(sku)
+    entry = catalog.by_sku(sku)
+    return cfg.expected.get(sku, entry.expected if entry else None)
+
+
 def count_from_tracks(
-    tracks: list[Track], cfg: CountConfig, catalog: Catalog
+    tracks: list[Track], cfg: CountConfig, catalog: Catalog,
+    expected: dict[str, int] | None = None,
 ) -> list[SkuCount]:
     grouped: dict[str, list[Track]] = defaultdict(list)
     for track in tracks:
@@ -159,7 +215,7 @@ def count_from_tracks(
                 count=len(sku_tracks),
                 label=entry.label if entry else sku,
                 confidence=float(np.mean(confidences)) if confidences else 0.0,
-                expected=cfg.expected.get(sku, entry.expected if entry else None),
+                expected=expected_for(sku, cfg, catalog, expected),
                 evidence={
                     "strategy": "tracking",
                     "tracks": [t.track_id for t in sku_tracks],
@@ -172,7 +228,8 @@ def count_from_tracks(
 
 
 def count_per_frame(
-    per_frame: dict[int, list[Item]], cfg: CountConfig, catalog: Catalog, how: str
+    per_frame: dict[int, list[Item]], cfg: CountConfig, catalog: Catalog, how: str,
+    expected: dict[str, int] | None = None,
 ) -> list[SkuCount]:
     """peak_frame / median_frame: aggregate the per-frame tallies."""
     tallies: dict[str, list[int]] = defaultdict(list)
@@ -203,7 +260,7 @@ def count_per_frame(
                 count=value,
                 label=entry.label if entry else sku,
                 confidence=float(np.clip(0.7 * base + 0.3 * stability, 0.0, 1.0)),
-                expected=cfg.expected.get(sku, entry.expected if entry else None),
+                expected=expected_for(sku, cfg, catalog, expected),
                 evidence={
                     "strategy": how,
                     "per_frame_min": min(series),
@@ -221,16 +278,40 @@ def finalise(
     per_frame: dict[int, list[Item]],
     cfg: CountConfig,
     catalog: Catalog,
+    expected: dict[str, int] | None = None,
 ) -> CountResult:
     if cfg.strategy == "tracking":
-        result.counts = count_from_tracks(tracks, cfg, catalog)
+        result.counts = count_from_tracks(tracks, cfg, catalog, expected)
     elif cfg.strategy in ("peak_frame", "median_frame"):
-        result.counts = count_per_frame(per_frame, cfg, catalog, cfg.strategy)
+        result.counts = count_per_frame(per_frame, cfg, catalog, cfg.strategy, expected)
     else:
         raise ValueError(
             f"unknown count strategy {cfg.strategy!r}; "
             "choose from tracking, peak_frame, median_frame"
         )
+    # An expected SKU that was never seen is the worst miss there is (the
+    # shelf is empty), and without a row it would have no variance to flag.
+    seen = {c.sku for c in result.counts}
+    wanted = expected if expected is not None else {
+        **catalog.expected_counts(), **cfg.expected
+    }
+    for sku, qty in sorted(wanted.items()):
+        if sku in seen or qty is None:
+            continue
+        entry = catalog.by_sku(sku)
+        result.counts.append(
+            SkuCount(
+                sku=sku,
+                count=0,
+                label=entry.label if entry else sku,
+                # Nothing was seen, so there is no identification to doubt;
+                # the variance, not the confidence, is what flags this row.
+                confidence=1.0,
+                expected=int(qty),
+                evidence={"strategy": "not_seen"},
+            )
+        )
+    result.counts.sort(key=lambda c: c.sku)
     result.tracks = len(tracks)
     if result.counts:
         total = sum(c.count for c in result.counts) or 1

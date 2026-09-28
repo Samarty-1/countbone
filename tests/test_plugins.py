@@ -141,11 +141,30 @@ def test_quality_gate_warns_when_most_footage_is_unusable():
 
 
 # -- analytics layer -------------------------------------------------------
-def test_tolerance_bands_scale_with_unit_value():
+def test_tolerance_flags_every_miss_by_default():
     rules = ToleranceRules()
+    assert rules.band_for(2.0)["abs"] == 0
+    assert rules.band_for(5000.0)["abs"] == 0
+
+
+def test_tolerance_bands_scale_with_unit_value():
+    rules = ToleranceRules(bands=[
+        {"max_unit_value": 10.0, "abs": 2, "pct": 0.03},
+        {"max_unit_value": 100.0, "abs": 1, "pct": 0.01},
+        {"max_unit_value": None, "abs": 0, "pct": 0.0},
+    ])
     assert rules.band_for(2.0)["abs"] == 2       # cheap stock, slack allowed
     assert rules.band_for(50.0)["abs"] == 1
     assert rules.band_for(5000.0)["abs"] == 0    # expensive stock, none allowed
+
+
+def test_a_cheap_one_unit_miss_is_flagged_by_default():
+    from countbone.catalog import Catalog, SkuEntry
+
+    ctx = RunContext(config=Config(), source="x")
+    ctx.state["catalog"] = Catalog([SkuEntry("SKU-C", "Carton", unit_value=2.0)])
+    result = CountResult(run_id="r", source="x", counts=[SkuCount("SKU-C", count=9, expected=10)])
+    assert ToleranceRules().on_counts(ctx, result).needs_review
 
 
 def test_tolerance_flags_a_breach_and_prices_it():
@@ -177,6 +196,12 @@ def test_tolerance_ignores_skus_with_no_expected_count():
 def test_every_review_item_gets_its_own_crop(demo_scene, config):
     """Regression: identical cartons in one frame overwrote each other's crop,
     so a reviewer was shown evidence belonging to a different item."""
+    # Review every sighting: the demo is now clean enough to raise none by
+    # itself, and this test is about crops, not about what gets flagged.
+    for spec in config.plugins:
+        if spec.name == "review_queue":
+            spec.options = {**(spec.options or {}), "item_threshold": 1.01,
+                            "settled_agreement": 1.01}
     result = Pipeline(config).run(demo_scene.path)
     crops = [r.crop_path for r in result.reviews if r.crop_path]
 

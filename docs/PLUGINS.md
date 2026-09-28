@@ -30,6 +30,7 @@ Options come from the config file and are passed to `configure()` as keyword arg
 | `on_frame` | `(ctx, frame)` | `Frame` or `None` | `None` drops the frame |
 | `on_detections` | `(ctx, frame, detections)` | `list[Detection]` | before identification |
 | `on_items` | `(ctx, frame, items)` | `list[Item]` | the frame is still in hand here |
+| `on_frame_tracked` | `(ctx, frame, items)` | — | track ids are assigned, pixels still in hand; `frame.meta["offset"]` is the camera offset (world = image − offset) |
 | `on_tracks` | `(ctx, tracks)` | `list[Track]` | after grouping, before counting |
 | `on_counts` | `(ctx, result)` | `CountResult` | the last chance to change the answer |
 | `on_output` | `(ctx, result)` | — | side effects only; the result is final |
@@ -111,12 +112,16 @@ Weights are normalised, so editing one cannot silently rescale the score.
 
 ### `tolerance` — analytics, priority 40
 
-Turns raw variance into a decision, banded by unit value from the catalog. Not enabled by default,
-because it only does something when expected counts exist.
+Turns raw variance into a decision, banded by unit value from the catalog. **On by default** and,
+by default, flags every miss: a count that disagrees with the expected number must never pass as
+clean. It only acts when a count has an expected number (a location's book stock, a PO line, or the
+catalog), and an expected SKU that was never seen is a zero row with its full variance.
 
 | Option | Default |
 | --- | --- |
-| `bands` | `[{max_unit_value: 10, abs: 2, pct: 0.03}, {max_unit_value: 100, abs: 1, pct: 0.01}, {max_unit_value: null, abs: 0, pct: 0.0}]` |
+| `bands` | `[{max_unit_value: null, abs: 0, pct: 0.0}]` (loosen per value band once the business decides, e.g. `{max_unit_value: 10, abs: 2, pct: 0.03}`) |
+
+What gets *approved* automatically is a separate decision, made by the Reconcile rules.
 
 The allowance for a SKU is `max(abs, round(pct × expected))`. A `max_unit_value: null` band is the
 catch-all and must come last. Breaches are priced: `value_at_risk = |variance| × unit_value`.
@@ -132,8 +137,47 @@ Routes what the system is unsure about to a person, with the crop attached.
 | `max_items` | `40` | cap per run; the rest are counted as truncated |
 | `save_crops` | `true` | write JPEG crops into `<run>/crops/` |
 | `review_unknown` | `true` | always review anything identified as `UNKNOWN` |
+| `review_single_sightings` | `true` | raise `possible_missed_item` for an object seen clearly but only once |
+| `single_min_confidence` | `0.6` | how clear that one sighting must be |
+| `settled_agreement` | `0.7` | an object seen 3+ times whose sightings agree this much raises no question |
 
-A doubtful SKU is one review task, not one per unit.
+A doubtful SKU is one review task, not one per unit. Item questions are asked once per tracked object,
+carry its `track_id`, rank by its least confident sighting and show its most complete view; the
+decision changes the final count (see `countbone.ops.final`).
+
+### `location_tag` — capture, priority 20
+
+Reads bay QR labels (`CB1:LOC:<code>`, printed by the dashboard) from the frames. Files a run with no
+location under the bay it shows, flags a run filed under a different bay, flags videos showing
+several bays, and drops detections inside the label (a label is not stock).
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `search_every` | `3` | scan every Nth frame until a label is found |
+| `watch_every` | `12` | afterwards, scan every Nth frame for a second label (every frame while one is in view) |
+
+### `shelf_check` — analytics, priority 45
+
+Empty facings from the counted objects' shelf positions (rows by height, gaps wider than a typical
+gap plus most of an object), each with a photo re-read from the source; with a planogram for the
+location, the differences named per position. Writes `shelf.json` and `gaps/`.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `min_fill` | `0.8` | a gap must fit this share of an object to count as an empty facing |
+| `photos` | `true` | save a marked photo per gap |
+| `max_photos` | `20` | cap per run |
+
+### `contact_sheet` — output, priority 80
+
+The clearest view of every counted object, in `tracks/` and on `contact_sheet.jpg`, grouped by SKU.
+Hashed into the audit pack and included in evidence packs.
+
+| Option | Default |
+| --- | --- |
+| `max_objects` | `600` |
+| `columns` | `12` |
+| `save_tracks` | `true` |
 
 ### `exception_report` — output, priority 60
 
@@ -156,7 +200,8 @@ that manifest.
 | `hash_source` | `true` |
 | `hash_artifacts` | `true` |
 
-Runs last so it can hash the outputs of earlier output plugins. Tamper-evident, not tamper-proof.
+Runs last so it can hash the outputs of earlier output plugins. Tamper-evident on its own; claim
+packs built from it are signed with the deployment's Ed25519 key (`countbone.ops.evidence`).
 
 ---
 

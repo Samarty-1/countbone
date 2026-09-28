@@ -75,8 +75,19 @@ The effect on the bundled demo (34 units of ground truth):
 
 | | counted | error |
 | --- | ---: | ---: |
-| without motion compensation | 56 | +65% |
-| with motion compensation | 33 | −2.9% |
+| without motion compensation | 52 | +53% |
+| with motion compensation | 34 | 0% |
+
+Motion must be accumulated through **every** frame, including those the quality gate drops.
+An earlier version only applied motion on frames that reached the tracker, so each dropped frame
+left every prediction a whole frame of pan behind; at walking speed that split every object in
+view into two tracks. On ten synthetic shelves that bug alone produced errors of up to +36%
+(mean 11%). Accumulating it (`Tracker.observe_motion`) brought the same ten to exact totals.
+
+The contour detector also pads each frame with its median tone before finding edges. Without it,
+a carton cut off by the frame edge has an open outline, and its label, the next closed shape
+inside, was reported as an object of its own: 145 of 145 "unidentified" sightings in one test
+video were exactly this.
 
 Track identity is a majority vote across sightings, not the first guess, because identification
 flickers and object permanence does not.

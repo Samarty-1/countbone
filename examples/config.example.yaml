@@ -2,8 +2,11 @@
 # Copy, edit, and pass with:  countbone run shelf.mp4 -c my-config.yaml
 
 capture:
-  every_n_frames: 5      # sample 1 frame in 5; lower = better tracking, slower
-  max_frames: 400        # hard cap per run
+  every_n_frames: 5      # the widest stride; adaptive sampling only ever narrows it
+  max_frames: 5000       # hard cap per run; reaching it is flagged for review
+  adaptive: true         # back-fill skipped frames on fast pans, retry after a dropped frame
+  target_shift_frac: 0.25  # aim for this much scene movement per sample, in object widths
+  max_shift_frac: 0.6    # back-fill a gap that moved further than this
   start_s: 0.0
   end_s: null
   resize_width: 960      # null keeps native resolution
@@ -23,7 +26,8 @@ detect:
   device: cpu
 
 identify:
-  backend: color         # color | classmap | fixture
+  backend: auto          # auto: photos once any product has them (Catalog studio), else colour
+                         # | appearance | color | classmap | fixture
   catalog: examples/catalog.example.yaml
   unknown_sku: UNKNOWN
 
@@ -45,19 +49,22 @@ output:
 
 plugins:
   - quality_gate
+  - location_tag         # bay QR labels in the video
   - multiframe
   - name: confidence
     options:
       sku_threshold: 0.60
       run_threshold: 0.65
-  - name: tolerance
+  - name: tolerance       # default: every miss is flagged; loosen by value band if wanted
     options:
       bands:
         - { max_unit_value: 10.0, abs: 2, pct: 0.03 }
         - { max_unit_value: 100.0, abs: 1, pct: 0.01 }
         - { max_unit_value: null, abs: 0, pct: 0.0 }
+  - shelf_check          # empty facings and planogram compliance
   - name: review_queue
     options:
       max_items: 40
   - exception_report
+  - contact_sheet        # a picture of every counted object
   - audit_pack

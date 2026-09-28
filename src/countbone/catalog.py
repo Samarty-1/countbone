@@ -23,6 +23,8 @@ class SkuEntry:
     classes: list[str] = field(default_factory=list)  # detector class names that map here
     unit_value: float = 0.0              # used by the tolerance plugin
     expected: int | None = None
+    barcodes: list[str] = field(default_factory=list)  # EAN/UPC printed on the product
+    source: str = "config"               # config | studio (made in Catalog Studio)
 
     def matches_hue(self, hue: float) -> bool:
         if self.hue is None:
@@ -63,6 +65,29 @@ class SkuEntry:
 @dataclass
 class Catalog:
     entries: list[SkuEntry] = field(default_factory=list)
+    # Enrolled photos, as appearance vectors (see appearance.py). Empty for a
+    # catalog that identifies by colour or detector class only.
+    exemplars: list[Any] = field(default_factory=list)
+    _index: Any = field(default=None, repr=False, compare=False)
+
+    def index(self):
+        """The appearance index over enrolled photos, built once per catalog."""
+        if self._index is None:
+            from .appearance import ExemplarIndex
+
+            self._index = ExemplarIndex(self.exemplars)
+        return self._index
+
+    def by_barcode(self, code: str) -> SkuEntry | None:
+        return next((e for e in self.entries if code in e.barcodes), None)
+
+    def merged(self, extra: list[SkuEntry]) -> Catalog:
+        """This catalog with `extra` entries added; an extra entry with the
+        same SKU replaces the configured one (the studio is the newer edit)."""
+        by_sku = {e.sku: e for e in self.entries}
+        for e in extra:
+            by_sku[e.sku] = e
+        return Catalog(list(by_sku.values()), list(self.exemplars))
 
     @classmethod
     def load(cls, path: str | Path | None) -> Catalog:
@@ -86,6 +111,7 @@ class Catalog:
                     classes=list(item.get("classes", []) or []),
                     unit_value=float(item.get("unit_value", 0.0)),
                     expected=item.get("expected"),
+                    barcodes=[str(b) for b in item.get("barcodes", []) or []],
                 )
             )
         return cls(entries)

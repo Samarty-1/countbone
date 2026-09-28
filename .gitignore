@@ -10,16 +10,30 @@ venv/
 .coverage
 htmlcov/
 
-# run artifacts and local data
-runs/
+# run artifacts and local data (anchored: web/src/features/runs is source)
+/runs/
 *.db
 *.db-wal
 *.db-shm
 examples/*.mp4
 examples/*.avi
+examples/*.webm
 
 # editors / OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+
+# dashboard build tooling (the built output in src/countbone/api/static is committed)
+web/node_modules/
+web/*.tsbuildinfo
+web/tsconfig.tsbuildinfo
+
+# deployment data: signing and secret keys, evidence packs, catalog photos (never commit)
+countbone-data/
+
+# mobile tooling
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/

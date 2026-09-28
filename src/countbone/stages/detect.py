@@ -88,9 +88,22 @@ class ContourDetector:
     def __init__(self, cfg: DetectConfig) -> None:
         self.cfg = cfg
 
+    # Width of the synthetic border added around each frame (see detect()).
+    PAD = 12
+
     def detect(self, frame: Frame) -> list[Detection]:
         image = frame.image
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+        # An object cut off by the frame edge has no edge along the cut, so
+        # its outline never closes; RETR_EXTERNAL then reports whatever is
+        # *inside* it (a carton's white label) as an object of its own. A
+        # border in the frame's median tone closes those outlines against the
+        # cut, where the plain background, being close to the median, stays
+        # edge-free. Objects touching the border are then dropped below:
+        # they are partial, and a pan shows each one whole in another frame.
+        pad = self.PAD
+        fill = int(np.median(gray))
+        gray = cv2.copyMakeBorder(gray, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=fill)
         gray = cv2.GaussianBlur(gray, (5, 5), 0)
 
         median = float(np.median(gray))
@@ -102,9 +115,15 @@ class ContourDetector:
 
         contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         detections: list[Detection] = []
+        frame_w, frame_h = frame.shape
         for contour in contours:
             x, y, w, h = cv2.boundingRect(contour)
             if w < 8 or h < 8:
+                continue
+            # Back to frame coordinates; skip anything reaching the frame edge.
+            x -= pad
+            y -= pad
+            if x <= 0 or y <= 0 or x + w >= frame_w or y + h >= frame_h:
                 continue
             rect_area = float(w * h)
             fill = float(cv2.contourArea(contour)) / rect_area if rect_area else 0.0

@@ -79,11 +79,11 @@ class ConfidenceScoring(Plugin):
 
     # -- per SKU and per run ---------------------------------------------
     def on_counts(self, ctx: RunContext, result: CountResult) -> CountResult:
+        capture_term = self._capture_term(ctx)
         for sku_count in result.counts:
             # The count stage already scored track quality; fold in how well
             # the whole capture went so a good count off bad footage is not
             # reported as certain.
-            capture_term = self._capture_term(ctx)
             blended = 0.75 * sku_count.confidence + 0.25 * capture_term
             sku_count.confidence = float(np.clip(blended, 0.0, 1.0))
             sku_count.evidence["below_threshold"] = (
@@ -111,8 +111,15 @@ class ConfidenceScoring(Plugin):
         stats = ctx.state.get("quality") or {}
         scores = stats.get("scores") or []
         if not scores:
-            return 0.7
-        sharpness = min(1.0, float(np.mean(scores)) / 150.0)
-        seen = max(stats.get("seen", 1), 1)
-        usable = 1.0 - stats.get("dropped", 0) / seen
-        return float(np.clip(0.6 * sharpness + 0.4 * usable, 0.0, 1.0))
+            base = 0.7
+        else:
+            sharpness = min(1.0, float(np.mean(scores)) / 150.0)
+            seen = max(stats.get("seen", 1), 1)
+            usable = 1.0 - stats.get("dropped", 0) / seen
+            base = float(np.clip(0.6 * sharpness + 0.4 * usable, 0.0, 1.0))
+        # Tracking continuity caps the whole term: sharp frames are worth
+        # little if the camera outran the tracker between them.
+        continuity = (ctx.state.get("continuity") or {}).get("score")
+        if continuity is not None:
+            base = min(base, 0.5 + 0.5 * float(continuity)) * (0.6 + 0.4 * float(continuity))
+        return float(np.clip(base, 0.0, 1.0))

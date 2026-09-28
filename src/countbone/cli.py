@@ -3,6 +3,7 @@
     countbone run video.mp4          count a video
     countbone demo                   generate synthetic footage and count it
     countbone serve                  dashboard + API
+    countbone user add NAME          create an account (also: list, reset-password)
     countbone plugins                what is installed
     countbone reviews                what is waiting for a human
     countbone history SKU            how this SKU has counted over time
@@ -13,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from datetime import datetime
 
@@ -77,10 +79,30 @@ def _print_result(result: CountResult, truth: dict[str, int] | None = None) -> N
         print("\nwrote: " + ", ".join(f"{k} -> {v}" for k, v in outputs.items()))
 
 
+def _pipeline(cfg: Config) -> Pipeline:
+    """A pipeline that also writes inspector.json, like one run from the API.
+
+    Without it, a video counted from the CLI appears in the dashboard (same
+    database) but can never be opened in its frame inspector. There is no one
+    to report live progress to here, so progress goes nowhere.
+    """
+    from .api import telemetry  # no web dependencies: safe without the [api] extra
+    from .catalog import Catalog
+    from .ops.catalog import load_catalog
+
+    store = Store(cfg.output.sqlite) if cfg.output.sqlite else None
+    base = Catalog.load(cfg.identify.catalog)
+    # With a database, products and photos from Catalog Studio count too.
+    provider = (lambda: load_catalog(base, store)) if store is not None else None
+    pipeline = Pipeline(cfg, store=store, catalog_provider=provider)
+    pipeline.plugins = telemetry.attach(pipeline.plugins, lambda *_, **__: None)
+    return pipeline
+
+
 # -- commands -------------------------------------------------------------
 def cmd_run(args: argparse.Namespace) -> int:
     cfg = _load_config(args)
-    result = Pipeline(cfg).run(args.video)
+    result = _pipeline(cfg).run(args.video)
     if args.json:
         print(json.dumps(result.to_dict(), indent=2))
     else:
@@ -95,7 +117,7 @@ def cmd_demo(args: argparse.Namespace) -> int:
     scene = make_demo_video(args.video or "examples/demo_shelf.mp4", seed=args.seed)
     print(f"synthetic shelf: {scene.path}  ({scene.total} units, {scene.frames} frames)")
     cfg.count.expected = dict(scene.truth)
-    result = Pipeline(cfg).run(scene.path)
+    result = _pipeline(cfg).run(scene.path)
     _print_result(result, truth=scene.truth)
     error = abs(result.total - scene.total)
     print(f"\nabsolute count error: {error} of {scene.total} "
@@ -107,9 +129,55 @@ def cmd_serve(args: argparse.Namespace) -> int:
     import uvicorn
 
     from .api.app import create_app
+    from .api.auth import is_loopback
 
     cfg = _load_config(args)
-    uvicorn.run(create_app(cfg), host=args.host, port=args.port, log_level="info")
+    if args.no_auth and not is_loopback(args.host):
+        raise SystemExit("--no-auth is only allowed on a loopback host (127.0.0.1); "
+                         "anyone on the network would be an admin")
+    app = create_app(cfg, allow_origins=args.allow_origin or (), auth=not args.no_auth,
+                     data_dir=args.data_dir)
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    return 0
+
+
+def cmd_user(args: argparse.Namespace) -> int:
+    import getpass
+
+    from .security import ROLES, check_password_policy, hash_password
+
+    store = Store(args.db or Config().output.sqlite or "countbone.db")
+    if args.action == "list":
+        for u in store.list_users():
+            state = "disabled" if u["disabled"] else "active"
+            print(f"{u['username']:<24}{u['role']:<10}{state:<10}{u['display_name'] or ''}")
+        return 0
+    if not args.username:
+        raise SystemExit("give a username")
+    password = os.environ.get(args.password_env) if args.password_env else None
+    if password is None:
+        password = getpass.getpass(f"password for {args.username}: ")
+    problem = check_password_policy(password)
+    if problem:
+        raise SystemExit(f"password rejected: {problem}")
+    if args.action == "add":
+        if args.role not in ROLES:
+            raise SystemExit(f"role must be one of {', '.join(ROLES)}")
+        if store.user_by_username(args.username):
+            raise SystemExit("that username exists; use reset-password")
+        store.create_user(args.username, hash_password(password), args.role, args.name,
+                          created_by="cli")
+        store.add_audit("users", "user_created", {"username": args.username, "role": args.role},
+                        actor="cli")
+        print(f"created {args.role} {args.username}")
+    else:  # reset-password
+        user = store.user_by_username(args.username)
+        if user is None:
+            raise SystemExit("no such user")
+        store.update_user(user["user_id"], pw_hash=hash_password(password), disabled=0)
+        store.delete_user_sessions(user["user_id"])
+        store.add_audit("users", "password_reset", {"username": args.username}, actor="cli")
+        print(f"password reset for {args.username}; their sessions were signed out")
     return 0
 
 
@@ -196,8 +264,28 @@ def build_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve", help="run the dashboard and API")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument(
+        "--allow-origin", action="append", metavar="ORIGIN",
+        help="let a browser app on this origin call the API, e.g. the mobile app's "
+             "web preview at http://localhost:8081 (repeatable; none by default). "
+             "Native apps need no origin.",
+    )
+    serve.add_argument("--no-auth", action="store_true",
+                       help="single-user local mode: no sign-in (loopback host only)")
+    serve.add_argument("--data-dir", help="keys, evidence packs and catalog photos "
+                                          "(default: countbone-data beside the database)")
     common(serve)
     serve.set_defaults(func=cmd_serve)
+
+    user = sub.add_parser("user", help="manage accounts (add, list, reset-password)")
+    user.add_argument("action", choices=["add", "list", "reset-password"])
+    user.add_argument("username", nargs="?")
+    user.add_argument("--role", default="counter", help="counter | manager | admin")
+    user.add_argument("--name", help="display name")
+    user.add_argument("--password-env", metavar="VAR",
+                      help="read the password from this environment variable instead of a prompt")
+    user.add_argument("--db")
+    user.set_defaults(func=cmd_user)
 
     plugins = sub.add_parser("plugins", help="list installed plugins")
     plugins.set_defaults(func=cmd_plugins)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "countbone"
-version = "0.1.0"
+version = "0.2.0"
 description = "A video-to-count pipeline for stock counting. The backbone is the product; everything else is a plugin."
 readme = "README.md"
 license = { text = "MIT" }
@@ -27,9 +27,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-api = ["fastapi>=0.110", "uvicorn>=0.27", "pydantic>=2.5", "python-multipart>=0.0.9"]
+api = [
+  "fastapi>=0.110", "uvicorn>=0.27", "pydantic>=2.5", "python-multipart>=0.0.9",
+  "httpx>=0.26",          # integrations (Shopify, NetSuite, SAP, webhooks)
+  "cryptography>=42",     # sealed integration secrets, signed evidence packs
+  "segno>=1.6",           # printable QR labels for bays
+]
 yolo = ["ultralytics>=8.1"]
-dev = ["pytest>=7.4", "pytest-cov>=4.1", "httpx>=0.26", "ruff>=0.4"]
+# imageio-ffmpeg: a bundled ffmpeg, so the variable-frame-rate test can build its clip.
+# oauthlib: the NetSuite OAuth 1.0a signature is checked against it in the tests.
+dev = ["pytest>=7.4", "pytest-cov>=4.1", "httpx>=0.26", "ruff>=0.4", "imageio-ffmpeg>=0.5",
+       "oauthlib>=3.2"]
 
 [project.scripts]
 countbone = "countbone.cli:main"
@@ -42,7 +50,8 @@ Issues = "https://github.com/Samarty-1/countbone/issues"
 where = ["src"]
 
 [tool.setuptools.package-data]
-countbone = ["api/static/*"]
+# The dashboard is built from web/ into api/static (see web/README.md).
+countbone = ["api/static/*", "api/static/assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -56,3 +65,8 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "C4"]
 ignore = ["E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency markers are meant to sit in argument defaults.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fastapi.Query",
+                          "countbone.api.auth.require"]

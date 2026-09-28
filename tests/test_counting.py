@@ -40,6 +40,23 @@ def test_a_pan_without_motion_compensation_fragments_tracks():
     assert len(tracker.tracks) > 1
 
 
+def test_a_dropped_frame_still_moves_the_camera():
+    """Regression: motion during a frame the quality gate dropped was lost, so
+    every track lagged a frame of pan and split in two (a double count)."""
+    tracker = Tracker()
+    motion = {"dx": -30.0, "dy": 0.0, "response": 0.9, "estimated": True}
+    x = 200.0
+    for f in range(6):
+        if f:
+            x -= 30
+        if f == 3:  # dropped by the quality gate: no items, but the camera moved
+            tracker.observe_motion(motion)
+            continue
+        tracker.update(f, [item(x, frame=f)], motion if f else None)
+    assert len(tracker.tracks) == 1
+    assert tracker.tracks[0].hits == 5
+
+
 def test_motion_compensation_keeps_a_panning_object_as_one_track():
     tracker = Tracker()
     motion = {"dx": -45.0, "dy": 0.0, "response": 0.9, "estimated": True}

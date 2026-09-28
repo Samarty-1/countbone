@@ -1,0 +1,94 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+/*
+ * Design tokens. Every colour in a component comes from here, never a raw hex.
+ * Dark is primary: stockrooms are dim and screens are glanced at, so text sits
+ * at 7:1 or better and status colours are bright enough to read at arm's length.
+ * WCAG contrast, measured on bg / surface / raised:
+ *   fg 16.9 / 16.0 / 15.0 · muted 7.5 / 7.2 / 6.7 · subtle 5.1 / 4.8 / 4.5
+ *   accent 6.2 / 5.9 / 5.5 · ok 10.4 · warn 10.9 · bad 6.8 · info 7.8 (on bg)
+ * Everything clears AA (4.5:1). `subtle` on raised is the floor: don't darken it.
+ */
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Code", Consolas, monospace;
+
+  --color-bg: #0b0c0e;
+  --color-surface: #111316;
+  --color-raised: #171a1e;
+  --color-hover: #1d2126;
+  --color-line: #23272e;
+  --color-line-strong: #323841;
+
+  --color-fg: #edeef0;
+  --color-muted: #9ba1ab;
+  --color-subtle: #7c828c;
+
+  --color-accent: #5b8cff;
+  --color-accent-fg: #0b0c0e;
+  --color-ok: #3dd68c;
+  --color-warn: #ffb224;
+  --color-bad: #ff6369;
+  --color-info: #52a8ff;
+
+  --radius-card: 10px;
+  --shadow-drawer: -24px 0 48px -12px rgb(0 0 0 / 0.6);
+
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  @keyframes shimmer {
+    from { background-position: -200% 0; }
+    to { background-position: 200% 0; }
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  body {
+    @apply bg-bg text-fg font-sans text-[13px] leading-5;
+  }
+  /* One focus treatment everywhere, only for keyboard users. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@utility skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-raised) 25%,
+    var(--color-hover) 50%,
+    var(--color-raised) 75%
+  );
+  background-size: 200% 100%;
+  animation: var(--animate-shimmer);
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

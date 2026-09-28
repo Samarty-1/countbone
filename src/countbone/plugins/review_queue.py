@@ -3,6 +3,18 @@
 The queue is the honest half of the product. Every item it raises carries the
 crop the model saw, so the reviewer decides from evidence rather than from
 trust.
+
+Three kinds of question are raised:
+
+  low_sku_confidence   a whole SKU's number is doubtful (one task, not N)
+  low_item_confidence  one object's identity is doubtful
+  unidentified         an object nobody could name
+  possible_missed_item an object seen clearly but only once, which the
+                       counter discards as noise; usually a real carton at
+                       the edge of the walk, occasionally a reflection
+
+Item-level questions are asked once per tracked object, not once per frame,
+and carry the track id, so a decision can change the count (ops.final).
 """
 
 from __future__ import annotations
@@ -31,8 +43,14 @@ class ReviewQueue(Plugin):
         max_items: int = 40,
         save_crops: bool = True,
         review_unknown: bool = True,
+        review_single_sightings: bool = True,
+        single_min_confidence: float = 0.6,
+        settled_agreement: float = 0.7,
         **_: Any,
     ) -> None:
+        # An object seen 3+ times whose sightings agree at least this much is
+        # settled by its own vote; its odd doubtful frame raises no question.
+        self.settled_agreement = float(settled_agreement)
         self.sku_threshold = float(sku_threshold)
         self.item_threshold = float(item_threshold)
         self.max_items = int(max_items)
@@ -41,6 +59,8 @@ class ReviewQueue(Plugin):
         self.candidate_cap = max(self.max_items * 2, self.max_items + 20)
         self.save_crops = bool(save_crops)
         self.review_unknown = bool(review_unknown)
+        self.review_single_sightings = bool(review_single_sightings)
+        self.single_min_confidence = float(single_min_confidence)
 
     def on_items(self, ctx: RunContext, frame, items):
         """Collect low-confidence sightings as they go past.
@@ -63,11 +83,58 @@ class ReviewQueue(Plugin):
                     "index_in_frame": index,
                     "bbox": item.detection.bbox,
                     "crop": self._crop(frame, item) if self.save_crops else None,
-                    "meta": {"id_source": item.id_source, **item.meta},
+                    # The tracker writes track_id onto this same object later.
+                    "item": item,
+                    "meta": {"id_source": item.id_source, **_public_meta(item.meta)},
                 }
             )
         self._trim(pending)
         return items
+
+    def on_frame_tracked(self, ctx: RunContext, frame, items) -> None:
+        """Remember the one sighting of objects seen once so far.
+
+        Most tracks get a second sighting a frame later and are forgotten
+        here; what is left at the end is exactly the set of objects the
+        counter will discard for being seen only once.
+        """
+        if not self.review_single_sightings:
+            return
+        hits: dict[int, int] = ctx.setdefault("review_track_hits", dict)
+        singles: dict[int, dict[str, Any]] = ctx.setdefault("review_singles", dict)
+        for index, item in enumerate(items):
+            tid = item.track_id
+            if tid is None:
+                continue
+            hits[tid] = hits.get(tid, 0) + 1
+            if hits[tid] == 1 and item.confidence >= self.single_min_confidence:
+                singles[tid] = {
+                    "sku": item.sku,
+                    "reason": "possible_missed_item",
+                    "confidence": item.confidence,
+                    "frame_index": frame.index,
+                    "index_in_frame": index,
+                    "bbox": item.detection.bbox,
+                    "crop": self._crop(frame, item) if self.save_crops else None,
+                    "item": item,
+                    "meta": {"id_source": item.id_source, **_public_meta(item.meta)},
+                }
+                if len(singles) > self.candidate_cap:
+                    # Oldest first: a long-open track is likely to be seen again.
+                    del singles[next(iter(singles))]
+            elif hits[tid] >= 2:
+                singles.pop(tid, None)
+
+    def on_tracks(self, ctx: RunContext, tracks):
+        ctx.state["review_track_index"] = {t.track_id: (t.sku, t.hits) for t in tracks}
+        # How firmly each object's sightings agree on what it is. One doubtful
+        # frame of an object seen ten times, nine of them clearly, is settled
+        # by the vote; asking a person about it is noise.
+        ctx.state["review_track_agreement"] = {
+            t.track_id: (sum(i.sku == t.sku for i in t.items) / len(t.items)) if t.items else 0.0
+            for t in tracks
+        }
+        return tracks
 
     def _trim(self, pending: list[dict[str, Any]]) -> None:
         """Keep only the least confident candidates.
@@ -82,10 +149,55 @@ class ReviewQueue(Plugin):
         pending.sort(key=lambda c: c["confidence"])
         del pending[self.max_items :]
 
+    def _one_per_track(self, candidates: list[dict[str, Any]], index) -> list[dict[str, Any]]:
+        """Ask about each object once.
+
+        The object's least confident sighting ranks it (how doubtful it is),
+        but the picture shown is its most complete view: the largest box.
+        The least confident sighting is often a partial or odd detection
+        (a label patch, an object half out of frame), and a reviewer shown
+        that would be deciding about the wrong thing.
+        """
+        by_track: dict[int, list[dict[str, Any]]] = {}
+        out = []
+        for cand in candidates:
+            tid = cand["item"].track_id
+            if tid is None:
+                out.append(cand)
+            else:
+                by_track.setdefault(tid, []).append(cand)
+
+        def area(c: dict[str, Any]) -> float:
+            x1, y1, x2, y2 = c["bbox"]
+            return (x2 - x1) * (y2 - y1)
+
+        for group in by_track.values():
+            shown = dict(max(group, key=area))
+            shown["confidence"] = min(c["confidence"] for c in group)
+            out.append(shown)
+        return sorted(out, key=lambda c: c["confidence"])
+
     def on_counts(self, ctx: RunContext, result: CountResult) -> CountResult:
-        candidates = sorted(
-            ctx.state.get("review_candidates", []), key=lambda c: c["confidence"]
+        index: dict[int, tuple[str, int]] = ctx.state.get("review_track_index", {})
+        agreement: dict[int, float] = ctx.state.get("review_track_agreement", {})
+        min_hits = ctx.config.count.min_hits
+        unknown_sku = ctx.config.identify.unknown_sku
+
+        def settled(cand: dict[str, Any]) -> bool:
+            tid = cand["item"].track_id
+            if tid is None or tid not in index:
+                return False
+            sku, hits = index[tid]
+            return (sku != unknown_sku and hits >= max(min_hits, 3)
+                    and agreement.get(tid, 0.0) >= self.settled_agreement)
+
+        candidates = self._one_per_track(
+            [c for c in ctx.state.get("review_candidates", []) if not settled(c)], index
         )
+        singles = [
+            c for tid, c in ctx.state.get("review_singles", {}).items()
+            if index.get(tid, ("", 0))[1] < min_hits
+        ]
         reviews: list[ReviewItem] = []
 
         # A whole SKU whose count is doubtful is one review task, not N.
@@ -108,18 +220,32 @@ class ReviewQueue(Plugin):
                 )
             )
 
-        for cand in candidates[: self.max_items]:
+        # Unsure identities first (they can move units between SKUs), then
+        # possible misses, highest-confidence first (most likely real).
+        ranked = candidates[: self.max_items]
+        room = max(0, self.max_items - len(ranked))
+        ranked += sorted(singles, key=lambda c: -c["confidence"])[:room]
+        for cand in ranked:
+            tid = cand["item"].track_id
+            track_sku, hits = index.get(tid, (None, 0)) if tid is not None else (None, 0)
             reviews.append(
                 ReviewItem(
                     review_id=new_id("rev"),
                     run_id=result.run_id,
-                    sku=cand["sku"],
+                    sku=track_sku or cand["sku"],
                     reason=cand["reason"],
                     confidence=cand["confidence"],
                     frame_index=cand["frame_index"],
                     bbox=cand["bbox"],
                     crop_path=self._write_crop(ctx, cand),
-                    meta={**cand["meta"], "scope": "item"},
+                    meta={
+                        **cand["meta"],
+                        "scope": "item",
+                        "track_id": tid,
+                        "track_sku": track_sku,
+                        "counted": hits >= min_hits,
+                        "sighting_sku": cand["sku"],
+                    },
                 )
             )
 
@@ -129,7 +255,8 @@ class ReviewQueue(Plugin):
         result.meta["review_queue"] = {
             "raised": len(reviews),
             "candidates_seen": len(candidates),
-            "truncated": max(0, len(candidates) - self.max_items),
+            "possible_misses": len(singles),
+            "truncated": max(0, len(candidates) + len(singles) - self.max_items),
         }
         return result
 
@@ -161,3 +288,8 @@ class ReviewQueue(Plugin):
         path = crops_dir / name
         cv2.imwrite(str(path), image)
         return str(path.relative_to(ctx.artifacts_dir))
+
+
+def _public_meta(meta: dict[str, Any]) -> dict[str, Any]:
+    """Item metadata worth showing a reviewer (not internal bookkeeping)."""
+    return {k: v for k, v in meta.items() if k not in ("world", "embedding", "low_confidence")}

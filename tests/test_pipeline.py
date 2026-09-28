@@ -27,6 +27,23 @@ def test_counts_synthetic_shelf_within_tolerance(demo_scene, config):
     assert {c.sku for c in result.counts} <= set(demo_scene.truth) | {"UNKNOWN"}
 
 
+@pytest.mark.parametrize("seed", [0, 3, 9])
+def test_other_shelves_count_exactly(seed, config, tmp_path):
+    """Regression: these seeds over-counted by +9 to +13 (up to 36%) while the
+    single default seed looked fine, because motion during dropped frames was
+    lost and every object in view split into two tracks. The number of
+    physical objects must now be exact. Which SKU each one is may still be off
+    by one (colour identification, a separate and weaker stage)."""
+    from countbone.demo import make_demo_video
+
+    scene = make_demo_video(tmp_path / f"shelf_{seed}.mp4", seed=seed)
+    result = Pipeline(config).run(scene.path)
+    counted = {c.sku: c.count for c in result.counts}
+    assert sum(counted.get(s, 0) for s in scene.truth) == scene.total
+    for sku, truth in scene.truth.items():
+        assert abs(counted.get(sku, 0) - truth) <= 1, f"{sku}: {counted.get(sku, 0)} vs {truth}"
+
+
 def test_per_sku_counts_are_close(demo_scene, config):
     result = Pipeline(config).run(demo_scene.path)
     counted = {c.sku: c.count for c in result.counts}
@@ -107,6 +124,36 @@ def test_every_counting_strategy_runs(demo_scene, config, strategy):
 def test_missing_video_is_a_clear_error(config):
     with pytest.raises(capture.CaptureError, match="not found"):
         Pipeline(config).run("does-not-exist.mp4")
+
+
+def test_frame_timestamps_follow_the_video_clock(demo_scene, config):
+    """Constant-rate footage: timestamps are exactly frame / fps."""
+    stamps = [(f.source_index, f.timestamp_s) for f in capture.frames(demo_scene.path, config.capture)]
+    fps = capture.probe(demo_scene.path)["fps"]
+    assert stamps and all(abs(t - i / fps) < 1e-3 for i, t in stamps)
+
+
+def test_variable_frame_rate_timestamps_do_not_drift(tmp_path, config):
+    """Regression: index / average-fps drifted over a second on VFR phone
+    footage, putting the inspector's boxes on the wrong frame."""
+    imageio_ffmpeg = pytest.importorskip("imageio_ffmpeg")
+    import subprocess
+
+    from countbone.demo import make_demo_video
+
+    src = make_demo_video(tmp_path / "cfr.webm", seed=1).path
+    vfr = tmp_path / "vfr.mkv"
+    # 30 fps for 60 frames, then 15 fps: frame 60 is at exactly 2.000 s.
+    subprocess.run(
+        [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-i", src,
+         "-vf", "setpts='if(lt(N,60),N/(30*TB),(2+(N-60)/15)/TB)'",
+         "-fps_mode", "vfr", "-c:v", "libvpx", str(vfr)],
+        check=True,
+    )
+    config.capture.every_n_frames = 1
+    stamps = {f.source_index: f.timestamp_s for f in capture.frames(str(vfr), config.capture)}
+    assert stamps[60] == pytest.approx(2.0, abs=0.02)
+    assert stamps[90] == pytest.approx(4.0, abs=0.02)
 
 
 def test_run_video_helper(demo_scene, tmp_path):
