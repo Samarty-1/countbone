@@ -156,6 +156,12 @@ function Product({ sku }: { sku: string }) {
         <Stat label="Closest other product" value={<span className="font-mono text-base">{q?.nearest ?? "—"}</span>} sub={q?.nearest_similarity ? `similarity ${q.nearest_similarity.toFixed(3)}` : undefined} />
         <Stat label="Acceptance bar" value={q ? q.accept_threshold.toFixed(3) : "—"} sub="set from its own photos" />
       </div>
+      {q?.more_photos_advised && (
+        <p className="mb-3 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
+          Another product has the same colour and no photos, so this one is held to a stricter bar and some of its
+          sightings go to review. Add photos up to {q.photos_advised} (or photograph the look-alike) to lift that.
+        </p>
+      )}
       {q && Object.keys(q.confused_with).length > 0 && (
         <p className="mb-3 rounded-md border border-bad/30 bg-bad/10 px-3 py-2 text-xs text-bad">
           Sometimes mistaken for {Object.keys(q.confused_with).join(", ")}. Add photos that show what makes it different (the front label, a logo).

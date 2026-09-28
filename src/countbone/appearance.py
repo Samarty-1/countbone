@@ -217,6 +217,11 @@ def vectors_for_photo(photo: np.ndarray, group: str, sku: str,
 
 
 DEFAULT_ACCEPT = 0.93   # used until a catalog has enough photos to calibrate
+# Below this many photos a product's own bar is set by its one or two least
+# alike probes: with 5 photos it swung 0.914-0.968 between photo sets of the
+# same product, and with 8 or more it stayed at or above 0.935. Such a bar
+# is trusted only where a runner-up can still catch a wrong match.
+MIN_PHOTOS_FOR_OWN_BAR = 8
 DEFAULT_MARGIN = 0.02
 
 
@@ -249,11 +254,13 @@ class ExemplarIndex:
             self.centroids = np.vstack([
                 _l2(self.matrix[self.owner == i].mean(axis=0)) for i in range(len(self.skus))
             ])
+            self.photos = {s: len(set(self.groups[self.owner == i])) for i, s in enumerate(self.skus)}
         else:
             self.matrix = np.zeros((0, 1), np.float32)
             self.owner = np.zeros(0, np.int32)
             self.groups = np.zeros(0, dtype=object)
             self.centroids = np.zeros((0, 1), np.float32)
+            self.photos = {}
         self.accept = DEFAULT_ACCEPT
         self.margin = DEFAULT_MARGIN
         self.accept_by_sku: dict[str, float] = {}
@@ -315,6 +322,10 @@ class ExemplarIndex:
 
     def accept_for(self, sku: str) -> float:
         return self.accept_by_sku.get(sku, self.accept)
+
+    def well_photographed(self, sku: str) -> bool:
+        """Enough photos that the product's own bar is not set by one odd view."""
+        return self.photos.get(sku, 0) >= MIN_PHOTOS_FOR_OWN_BAR
 
 
 def confidence(matches: list[Match], accept: float, margin: float) -> float:

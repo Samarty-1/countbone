@@ -421,6 +421,10 @@ class OpsRepo(_Base):
         return self._update("uploads", "upload_id", upload_id, fields,
                             {"received", "status", "run_id", "updated_at"})
 
+    def stale_uploads(self, before: float) -> list[dict[str, Any]]:
+        """Open uploads nobody has added to since `before`: abandoned."""
+        return self._rows("SELECT * FROM uploads WHERE status = 'open' AND updated_at < ?", (before,))
+
     # walks: several videos of one place ----------------------------------------------
     def create_walk(self, location: str | None, name: str | None,
                     actor: str | None) -> dict[str, Any]:
@@ -476,7 +480,10 @@ class OpsRepo(_Base):
         return row
 
     def list_tasks(self, status: str | None = None, assignee: str | None = None,
-                   location: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+                   location: str | None = None, limit: int = 200,
+                   for_user: str | None = None) -> list[dict[str, Any]]:
+        """`for_user`: what that person can pick up: tasks assigned to them, and
+        unassigned ones that are not a recount of their own run."""
         clauses, params = [], []
         if status:
             clauses.append("t.status = ?")
@@ -484,6 +491,10 @@ class OpsRepo(_Base):
         if assignee:
             clauses.append("t.assignee = ?")
             params.append(assignee)
+        if for_user:
+            clauses.append("(t.assignee = ? OR (t.assignee IS NULL AND NOT EXISTS ("
+                           "SELECT 1 FROM runs r WHERE r.run_id = t.run_id AND r.created_by = ?)))")
+            params.extend([for_user, for_user])
         if location:
             clauses.append("t.location = ?")
             params.append(location)

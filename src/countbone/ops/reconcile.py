@@ -45,6 +45,13 @@ DEFAULT_RULES: dict[str, Any] = {
     # push approved adjustments to this integration as soon as they are approved
     "post_to": None,
     "auto_post": False,
+    # Separation of duties. A recount is not done by the person whose count is
+    # in dispute, and an adjustment is not approved by whoever counted or
+    # recounted it: otherwise one person can film, "correct" and sign off a
+    # change to the book alone, which is exactly what a stock count exists to
+    # catch. A one-person shop can turn these off.
+    "independent_recount": True,
+    "four_eyes": True,
 }
 
 RULE_ROLE = {"auto": "counter", "manager": "manager", "admin": "admin"}
@@ -60,6 +67,9 @@ def set_rules(services: Services, patch: dict[str, Any], actor: dict[str, Any]) 
         raise OpsError(f"unknown rule(s): {', '.join(sorted(unknown))}")
     if patch.get("recount_policy") not in (None, "all", "above_auto", "none"):
         raise OpsError("recount_policy must be all, above_auto or none")
+    for key in ("independent_recount", "four_eyes", "auto_post"):
+        if key in patch and not isinstance(patch[key], bool):
+            raise OpsError(f"{key} must be true or false")
     for key in ("auto_approve_max_value", "manager_max_value", "auto_approve_max_units",
                 "recount_due_hours"):
         if key in patch and (patch[key] is None or float(patch[key]) < 0):
@@ -189,7 +199,10 @@ def _route(services: Services, adj: dict[str, Any], run: dict[str, Any], pending
             kind="recount", status="open", location=adj["location"], sku=adj["sku"],
             run_id=adj["run_id"], reason=f"counted {adj['counted_qty']}, book says {adj['system_qty']}",
             expected=adj["system_qty"], counted=adj["counted_qty"], variance=adj["delta"],
-            value_at_risk=abs(adj["value"]), assignee=run.get("created_by"), due_at=due,
+            value_at_risk=abs(adj["value"]),
+            # Unassigned under independent_recount: anyone but the first
+            # counter takes it (or a manager assigns it).
+            assignee=None if r.get("independent_recount") else run.get("created_by"), due_at=due,
             created_by="system",
         )
         store.add_audit(task["task_id"], "task_created",
@@ -244,6 +257,8 @@ def approve(services: Services, adjustment_id: str, actor: dict[str, Any],
     needed = RULE_ROLE.get(adj["rule"] or "admin", "admin")
     if not role_at_least(actor["role"], needed):
         raise Forbidden(f"a difference worth {abs(adj['value']):.2f} needs {needed} approval")
+    if rules(services).get("four_eyes") and actor.get("user_id") in _involved(store, adj):
+        raise Forbidden("you counted or recounted this: someone else has to approve it")
     # The old note said what it was waiting for; approval answers that.
     store.update_adjustment(adjustment_id, status="approved", decided_by=actor["user_id"],
                             decided_at=time.time(), note=note or None)
@@ -255,6 +270,18 @@ def approve(services: Services, adjustment_id: str, actor: dict[str, Any],
     if r.get("auto_post") and r.get("post_to"):
         post(services, [adjustment_id], actor=actor)
     return store.get_adjustment(adjustment_id)  # type: ignore[return-value]
+
+
+def _involved(store, adj: dict[str, Any]) -> set[str]:
+    """Who produced the numbers behind an adjustment: its count and its recount."""
+    people: set[str] = set()
+    run = store.get_run(adj["run_id"]) if adj.get("run_id") else None
+    if run and run.get("created_by"):
+        people.add(run["created_by"])
+    task = store.get_task(adj["task_id"]) if adj.get("task_id") else None
+    if task and task.get("closed_by"):
+        people.add(task["closed_by"])
+    return people
 
 
 def reject(services: Services, adjustment_id: str, actor: dict[str, Any], note: str) -> dict[str, Any]:

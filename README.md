@@ -16,7 +16,7 @@ packs. Around it sits the product:
 |---|---|
 | **Count** | Cycle counts by video from the phone app, with live coaching; bay QR labels; walks that merge overlapping videos; recount tasks when a count disagrees with the book |
 | **Catalog studio** | Teach a product with about five photos; tells look-alikes apart that colour cannot |
-| **Reconcile** | Differences become valued adjustments, approved by rules (auto / manager / finance) and posted to Shopify, NetSuite, SAP, a signed webhook, or CSV |
+| **Reconcile** | Differences become valued adjustments, approved by rules (auto / manager / finance) and posted to Shopify, NetSuite, SAP, a signed webhook, or CSV. Recounts go to someone other than the first counter, and nobody approves a change they counted or recounted (both switchable for a one-person shop) |
 | **Receive** | Film a delivery against its PO; shortages draft supplier claims |
 | **Evidence** | Ed25519-signed claim packs anyone can verify offline, over a hash-chained audit trail |
 | **Shelf** | Empty facings (with photos) and planogram compliance from the same walk |

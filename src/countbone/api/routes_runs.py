@@ -7,10 +7,12 @@ import colorsys
 import hashlib
 import re
 import shutil
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
+from anyio import to_thread
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
@@ -28,6 +30,7 @@ from .auth import current_principal, require
 
 MAX_UPLOAD_BYTES = 8 * 1024**3        # 8 GiB: a long 4K walk, not a disk-filling attack
 CHUNK_LIMIT = 64 * 1024**2            # per resumable PUT
+UPLOAD_TTL_S = 7 * 86400              # an upload untouched this long is abandoned
 
 
 def _swatch(entry: SkuEntry) -> str | None:
@@ -72,6 +75,10 @@ class UploadStart(BaseModel):
     task_id: str | None = None
     walk_id: str | None = None
     job_id: str | None = None
+
+
+class UploadComplete(BaseModel):
+    sha256: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{64}$")
 
 
 class WalkCreate(BaseModel):
@@ -184,6 +191,8 @@ def router(ctx) -> APIRouter:
         # becomes part of a path.
         stem = _safe_stem(file.filename)
         target = ctx.uploads_dir / (f"{run_id}__{stem}{suffix}" if stem else f"{run_id}{suffix}")
+        if file.size is not None and file.size > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "video is larger than 8 GB")  # before copying any of it
         with target.open("wb") as fh:
             shutil.copyfileobj(file.file, fh)
         if target.stat().st_size > MAX_UPLOAD_BYTES:
@@ -203,11 +212,19 @@ def router(ctx) -> APIRouter:
     @r.post("/api/uploads", status_code=201)
     def upload_start(body: UploadStart, who: dict = Depends(counter)) -> dict[str, Any]:
         """Begin (or resume) an upload. The same client_id always gets the same upload."""
+        _expire_stale_uploads()
         if body.client_id:
             existing = store.upload_by_client(body.client_id)
             if existing is not None:
                 if existing["created_by"] != who["user_id"] and who["role"] != "admin":
-                    raise HTTPException(409, "that recording id belongs to someone else")
+                    # 403, not 409: this will never succeed however often it is retried.
+                    raise HTTPException(403, "that recording id belongs to someone else")
+                if existing["status"] == "expired":
+                    # Abandoned long enough that the partial file was cleared:
+                    # the same recording starts again from zero.
+                    Path(existing["path"]).touch()
+                    store.set_upload(existing["upload_id"], received=0, status="open")
+                    existing = store.get_upload(existing["upload_id"]) or existing
                 return _upload_view(existing)
         suffix = (Path(body.filename).suffix or ".mp4").lower()
         if suffix not in VIDEO_SUFFIXES:
@@ -222,6 +239,32 @@ def router(ctx) -> APIRouter:
                                  body.sha256.lower() if body.sha256 else None, params,
                                  str(partial), who["user_id"])
         return _upload_view(up)
+
+    # One lock per upload: a phone that retries a chunk while the first try
+    # is still arriving, or taps complete twice, must not interleave writes or
+    # submit the same video twice.
+    upload_locks: dict[str, threading.Lock] = {}
+    locks_guard = threading.Lock()
+
+    def _upload_lock(upload_id: str) -> threading.Lock:
+        with locks_guard:
+            return upload_locks.setdefault(upload_id, threading.Lock())
+
+    last_sweep = [0.0]
+
+    def _expire_stale_uploads(force: bool = False) -> None:
+        now = time.time()
+        if not force and now - last_sweep[0] < 3600:
+            return
+        last_sweep[0] = now
+        for up in store.stale_uploads(now - UPLOAD_TTL_S):
+            with _upload_lock(up["upload_id"]):
+                Path(up["path"]).unlink(missing_ok=True)
+                store.set_upload(up["upload_id"], status="expired", received=0)
+            with locks_guard:
+                upload_locks.pop(up["upload_id"], None)
+
+    ctx.extra["expire_stale_uploads"] = _expire_stale_uploads
 
     def _upload_view(up: dict[str, Any]) -> dict[str, Any]:
         return {"upload_id": up["upload_id"], "offset": up["received"], "size": up["size"],
@@ -252,28 +295,61 @@ def router(ctx) -> APIRouter:
             offset = int(request.headers.get("upload-offset", ""))
         except ValueError:
             raise HTTPException(400, "Upload-Offset header required") from None
-        body = await request.body()
-        if len(body) > CHUNK_LIMIT:
+        declared = request.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > CHUNK_LIMIT:
             raise HTTPException(413, "chunks are at most 64 MB")
-        received = up["received"]
-        if offset > received:
-            return Response(status_code=409, headers={"Upload-Offset": str(received)},
-                            content=f'{{"detail":"resume from {received}"}}',
-                            media_type="application/json")
-        skip = received - offset  # bytes of this chunk the server already has
-        new = body[skip:]
-        if received + len(new) > up["size"]:
-            raise HTTPException(400, "more data than the declared size")
-        if new:
-            with open(up["path"], "r+b") as fh:
-                fh.seek(received)
-                fh.write(new)
-            store.set_upload(upload_id, received=received + len(new))
-        return Response(status_code=204, headers={"Upload-Offset": str(received + len(new))})
+        # Streamed with a hard cap: the proxy allows multi-GB bodies, and
+        # reading one whole before checking it would take the server down.
+        parts: list[bytes] = []
+        size = 0
+        async for piece in request.stream():
+            size += len(piece)
+            if size > CHUNK_LIMIT:
+                raise HTTPException(413, "chunks are at most 64 MB")
+            parts.append(piece)
+        body = b"".join(parts)
+
+        def write() -> Response:
+            with _upload_lock(upload_id):
+                current = store.get_upload(upload_id)
+                if current is None or current["status"] != "open":
+                    raise HTTPException(409, "upload already complete")
+                received = current["received"]
+                if offset > received:
+                    return Response(status_code=409, headers={"Upload-Offset": str(received)},
+                                    content=f'{{"detail":"resume from {received}"}}',
+                                    media_type="application/json")
+                new = body[received - offset:]  # skip bytes the server already has
+                if received + len(new) > current["size"]:
+                    raise HTTPException(400, "more data than the declared size")
+                if new:
+                    with open(current["path"], "r+b") as fh:
+                        fh.seek(received)
+                        fh.write(new)
+                    store.set_upload(upload_id, received=received + len(new))
+                return Response(status_code=204,
+                                headers={"Upload-Offset": str(received + len(new))})
+
+        # File and database work off the event loop, so one slow disk write
+        # does not stall every other request.
+        return await to_thread.run_sync(write)
 
     @r.post("/api/uploads/{upload_id}/complete", status_code=202)
-    def upload_complete(upload_id: str, who: dict = Depends(counter)) -> dict[str, Any]:
-        up = _own_upload(upload_id, who)
+    def upload_complete(upload_id: str, body: UploadComplete | None = None,
+                        who: dict = Depends(counter)) -> dict[str, Any]:
+        _own_upload(upload_id, who)
+        with _upload_lock(upload_id):
+            return _complete(upload_id, who, body.sha256.lower() if body and body.sha256 else None)
+
+    def _complete(upload_id: str, who: dict[str, Any], sha256: str | None) -> dict[str, Any]:
+        up = store.get_upload(upload_id)
+        assert up is not None  # checked by the caller under the same lock
+        if sha256 and up["sha256"] and sha256 != up["sha256"]:
+            raise HTTPException(400, "the checksum differs from the one given at the start")
+        # The phone hashes as it sends, so it only knows the digest at the end.
+        up["sha256"] = up["sha256"] or sha256
+        if up["status"] == "expired":
+            raise HTTPException(409, "this upload was abandoned and cleared; start it again")
         if up["status"] == "complete":
             return {"run_id": up["run_id"], "status": "queued", "duplicate": True}
         if up["received"] != up["size"]:

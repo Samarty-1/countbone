@@ -157,6 +157,9 @@ def create_app(
             if resumed:
                 log.info("resumed %d queued run(s) from before the restart", resumed)
         db.purge_expired_sessions()
+        sweep = ctx.extra.get("expire_stale_uploads")
+        if sweep:
+            sweep(force=True)  # partial files of uploads abandoned while the server was down
         yield
         runner.shutdown()
 

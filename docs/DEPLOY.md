@@ -25,6 +25,13 @@ countbone serve --host 127.0.0.1 --port 8000 --db /srv/countbone/countbone.db \
 Put it behind TLS (Caddy, nginx, a cloud load balancer). Never expose the
 plain HTTP port: sign-in sends passwords, and the phone app sends a token.
 
+Tell countbone which proxy to believe about the real client address, or
+every user looks like the proxy: `--forwarded-allow-ips 10.0.0.5` (the
+proxy's address), or `'*'` when nothing but the proxy can reach the port.
+`docker-compose.yml` already sets `FORWARDED_ALLOW_IPS=*` for Caddy. Never
+use `'*'` with the port open to the network: anyone could then claim any
+address in the audit trail.
+
 ## 2. Set it up (the customer's admin, in the dashboard)
 
 1. **Settings → People**: add counters and managers. Roles:
@@ -73,6 +80,7 @@ stopped is picked up again.
 ## 5. Security checklist
 
 - [ ] TLS in front, plain port not reachable from outside
+- [ ] `--forwarded-allow-ips` names the proxy (sign-ins in the audit trail show real client addresses)
 - [ ] `countbone-data/keys` backed up separately and readable only by the service user
 - [ ] Admin accounts only for people who administer; everyone else counter or manager
 - [ ] Former staff: **Settings → People → Disable** (their sessions end at once)

@@ -4,7 +4,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { api, getServer, hydrate, onSignedOut, setServer, type Principal } from '@/api/client';
-import { startQueue, type Target } from '@/api/uploadQueue';
+import { setQueueUser, startQueue, type Target } from '@/api/uploadQueue';
 
 interface Session {
   ready: boolean;
@@ -43,7 +43,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setServerState(s);
       if (token) {
         try {
-          setUser(await api.me());
+          const me = await api.me();
+          setUser(me);
+          await setQueueUser({ id: me.user_id, name: me.display_name });
         } catch {
           // Offline at launch: keep the token and let the queue retry. The
           // screens that need the server say so; recording still works.
@@ -65,12 +67,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setServerState(getServer());
     const me = await api.login(username, password);
     setUser(me);
+    await setQueueUser({ id: me.user_id, name: me.display_name });
     startQueue();
   }, []);
 
   const signOut = useCallback(async () => {
     await api.logout();
     setUser(null);
+    // Recordings stay on the phone for their filmer; the next person to sign
+    // in does not upload them as their own.
+    await setQueueUser(null);
   }, []);
 
   const value = useMemo(

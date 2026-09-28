@@ -9,7 +9,14 @@ from pydantic import BaseModel, Field
 
 from .. import integrations
 from ..ops import reconcile
-from ..security import ROLES, check_password_policy, hash_password, new_token, token_hash
+from ..security import (
+    ROLES,
+    check_password_policy,
+    hash_password,
+    new_token,
+    role_at_least,
+    token_hash,
+)
 from .auth import public_user, require
 
 
@@ -60,10 +67,15 @@ def router(ctx) -> APIRouter:
 
     # -- people --------------------------------------------------------------------------
     @r.get("/api/users")
-    def list_users(_: dict = Depends(counter)) -> list[dict[str, Any]]:
+    def list_users(who: dict = Depends(counter)) -> list[dict[str, Any]]:
         # Everyone can see who is on the team (to assign and to read the trail);
-        # only an admin can change it.
-        return [public_user(u) for u in store.list_users()]
+        # only an admin can change it. When people last signed in, and whose
+        # account is disabled, is for managers: a counter needs names, not that.
+        users = [public_user(u) for u in store.list_users()]
+        if role_at_least(who["role"], "manager"):
+            return users
+        return [{k: u[k] for k in ("user_id", "username", "display_name", "role")}
+                for u in users if not u.get("disabled")]
 
     @r.post("/api/users", status_code=201)
     def create_user(body: UserIn, who: dict = Depends(admin)) -> dict[str, Any]:

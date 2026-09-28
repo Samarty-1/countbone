@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -25,7 +26,14 @@ MAX_ATTEMPTS = 3
 
 
 class RunTracker:
-    """Live progress of runs in flight. Small enough to keep in memory."""
+    """Live progress of runs in flight. Small enough to keep in memory.
+
+    Finished runs linger (a client polling a run that just ended still sees
+    its last state) but only the newest KEEP_FINISHED of them: a server that
+    counts for months must not keep every run it ever saw.
+    """
+
+    KEEP_FINISHED = 500
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -34,14 +42,28 @@ class RunTracker:
     def set(self, run_id: str, **fields: Any) -> None:
         with self._lock:
             self._state.setdefault(run_id, {"run_id": run_id}).update(fields)
+            self._state[run_id]["_touched"] = time.time()
+            if fields.get("status") in ("done", "failed"):
+                self._evict()
+
+    def _evict(self) -> None:
+        finished = [k for k, v in self._state.items() if v.get("status") in ("done", "failed")]
+        if len(finished) > self.KEEP_FINISHED:
+            finished.sort(key=lambda k: self._state[k]["_touched"])
+            for k in finished[: len(finished) - self.KEEP_FINISHED]:
+                del self._state[k]
+
+    @staticmethod
+    def _public(v: dict[str, Any]) -> dict[str, Any]:
+        return {k: x for k, x in v.items() if k != "_touched"}
 
     def get(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:
-            return dict(self._state[run_id]) if run_id in self._state else None
+            return self._public(self._state[run_id]) if run_id in self._state else None
 
     def all(self) -> list[dict[str, Any]]:
         with self._lock:
-            return [dict(v) for v in self._state.values()]
+            return [self._public(v) for v in self._state.values()]
 
 
 class JobRunner:

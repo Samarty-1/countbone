@@ -15,6 +15,11 @@ services:
       # Optional: take the secret key from your secret manager instead of the
       # generated file in /data/countbone-data/keys (see docs/DEPLOY.md).
       - COUNTBONE_SECRET_KEY=${COUNTBONE_SECRET_KEY:-}
+      # Port 8000 is reachable only from this compose network (expose, not
+      # ports), so the one thing that can send X-Forwarded-For is Caddy.
+      # Without this every user shares Caddy's address in the login throttle
+      # and the audit trail.
+      - FORWARDED_ALLOW_IPS=*
     expose:
       - "8000"
 

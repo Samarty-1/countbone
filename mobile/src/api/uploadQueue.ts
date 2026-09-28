@@ -11,7 +11,15 @@
  * States:  waiting -> uploading -> done          (the server has it, counting)
  *                  \-> waiting (retry later)      network trouble, backs off
  *                  \-> failed                      the server refused it: needs a person
+ *
+ * Each recording belongs to whoever was signed in when it was filmed. On a
+ * shared phone, the next person's sign-in must not upload it as theirs: a
+ * recording waits for its own filmer to sign in again.
+ *
+ * The phone hashes the video as it sends it and gives the server the SHA-256
+ * at the end, so a file damaged on the way is never counted.
  */
+import { sha256 } from '@noble/hashes/sha2.js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Network from 'expo-network';
 import { AppState } from 'react-native';
@@ -43,14 +51,20 @@ export interface QueueItem {
   error: string | null;
   attempts: number;
   nextTryAt: number;
+  /** Who filmed it (user_id). Absent on items queued before this was recorded. */
+  ownerId?: string | null;
+  ownerName?: string | null;
 }
 
 const KEY = 'countbone.queue.v1';
+const USER_KEY = 'countbone.queue.user';
 const CHUNK = 4 * 1024 * 1024;
 
 let items: QueueItem[] = [];
 let loaded = false;
 let running = false;
+/** The signed-in user, remembered so an offline launch still knows whose queue this is. */
+let currentUser: { id: string; name: string } | null = null;
 const listeners = new Set<() => void>();
 
 const emit = () => listeners.forEach((l) => l());
@@ -68,6 +82,11 @@ async function load() {
   } catch {
     items = [];
   }
+  try {
+    currentUser ??= JSON.parse((await AsyncStorage.getItem(USER_KEY)) ?? 'null');
+  } catch {
+    currentUser = null;
+  }
   // An upload interrupted mid-chunk resumes from the server's offset.
   items = items.map((i) => (i.state === 'uploading' ? { ...i, state: 'waiting' } : i));
   emit();
@@ -79,6 +98,18 @@ export function subscribe(listener: () => void) {
 }
 
 export const snapshot = () => items;
+
+/** Called by the session on sign-in (the user) and sign-out (null). */
+export async function setQueueUser(user: { id: string; name: string } | null) {
+  currentUser = user;
+  await AsyncStorage.setItem(USER_KEY, JSON.stringify(user)).catch(() => undefined);
+  emit();
+  if (user) void pump();
+}
+
+/** A recording someone else filmed: it waits for them rather than uploading as the current user. */
+export const waitsForSomeoneElse = (i: QueueItem) =>
+  !!i.ownerId && !!currentUser && i.ownerId !== currentUser.id;
 
 function update(id: string, patch: Partial<QueueItem>) {
   items = items.map((i) => (i.id === id ? { ...i, ...patch } : i));
@@ -93,7 +124,8 @@ export async function enqueue(recording: StoredRecording, target: Target, id: st
   await load();
   items = [
     { id, createdAt: Date.now(), recording, target, durationS, state: 'waiting', uploadId: null, sent: 0,
-      runId: null, error: null, attempts: 0, nextTryAt: 0 },
+      runId: null, error: null, attempts: 0, nextTryAt: 0,
+      ownerId: currentUser?.id ?? null, ownerName: currentUser?.name ?? null },
     ...items,
   ];
   await save();
@@ -156,13 +188,31 @@ async function sendOne(item: QueueItem) {
   }
   sent = started.offset; // the server's word, not ours
   update(item.id, { uploadId, sent });
+  // The hash covers every byte in order, so on a resume the part the server
+  // already has is read back and hashed first (reading is far cheaper than
+  // the network it replaces).
+  const hash = sha256.create();
+  for (let at = 0; at < sent; ) {
+    const bytes = await readChunk(item.recording.ref, at, Math.min(CHUNK, sent - at));
+    hash.update(bytes);
+    at += bytes.length;
+  }
   while (sent < item.recording.size) {
     const bytes = await readChunk(item.recording.ref, sent, Math.min(CHUNK, item.recording.size - sent));
-    sent = await api.putChunk(uploadId, sent, bytes);
+    const next = await api.putChunk(uploadId, sent, bytes);
+    if (next === sent + bytes.length) {
+      hash.update(bytes);
+    } else if (next !== sent) {
+      // The server is somewhere else (another attempt got further): the
+      // running hash no longer lines up, so start this upload over cleanly.
+      throw new ApiError(409, `server is at byte ${next}; resuming from there`);
+    }
+    sent = next;
     update(item.id, { sent });
     await save();
   }
-  const done = await api.completeUpload(uploadId);
+  const digest = Array.from(hash.digest(), (b) => b.toString(16).padStart(2, '0')).join('');
+  const done = await api.completeUpload(uploadId, digest);
   update(item.id, { state: 'done', runId: done.run_id, sent: item.recording.size, attempts: 0 });
   // The server has the video and its hash: the phone's copy is no longer needed.
   await forgetRecording(item.recording.ref).catch(() => undefined);
@@ -179,7 +229,7 @@ export async function pump() {
     for (;;) {
       const now = Date.now();
       const next = items
-        .filter((i) => i.state === 'waiting' && i.nextTryAt <= now)
+        .filter((i) => i.state === 'waiting' && i.nextTryAt <= now && !waitsForSomeoneElse(i))
         .sort((a, b) => a.createdAt - b.createdAt)[0];
       if (!next) break;
       try {

@@ -240,6 +240,13 @@ class AppearanceIdentifier:
                 and not any(_bands_overlap(e, other) for other in enrolled)
             ]
         self.colour = ColorIdentifier(cfg, Catalog(fallback))
+        # A photographed product sharing its colour with one nobody
+        # photographed has an invisible rival: the look-alike can never win a
+        # match, so nothing catches a crop of it that clears the photographed
+        # product's bar. With few photos that bar is one odd view away from
+        # letting it through, so it is held to at least the default bar.
+        self._floor = {e.sku: appearance.DEFAULT_ACCEPT for e in shadowed(catalog, self.index)
+                       if not self.index.well_photographed(e.sku)}
 
     def identify(self, frame: Frame, detections: list[Detection]) -> list[Item]:
         items: list[Item] = []
@@ -255,6 +262,8 @@ class AppearanceIdentifier:
                 continue
             matches = self.index.match(self._embed(patch)) if len(self.index) else []
             accept = self.index.accept_for(matches[0].sku) if matches else self.index.accept
+            if matches:
+                accept = max(accept, self._floor.get(matches[0].sku, 0.0))
             conf = self._confidence(matches, accept, self.index.margin)
             candidates = [{"sku": m.sku, "score": round(m.score, 4)} for m in matches]
             if matches and matches[0].score >= accept:
@@ -271,6 +280,13 @@ class AppearanceIdentifier:
             items.append(Item(det, self.cfg.unknown_sku, "Unidentified", conf, "fallback",
                               meta={"candidates": candidates, **fallback.meta}))
         return items
+
+
+def shadowed(catalog: Catalog, index) -> list[SkuEntry]:
+    """Photographed products that share their colour with an unphotographed one."""
+    enrolled = [e for e in catalog.entries if e.sku in set(index.skus)]
+    others = [e for e in catalog.entries if e.sku not in set(index.skus)]
+    return [e for e in enrolled if any(_bands_overlap(e, o) for o in others)]
 
 
 class AutoIdentifier:

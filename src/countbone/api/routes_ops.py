@@ -263,7 +263,9 @@ def router(ctx) -> APIRouter:
     @r.get("/api/tasks")
     def list_tasks(status: str | None = None, mine: bool = False, location: str | None = None,
                    who: dict = Depends(counter)):
-        return store.list_tasks(status=status, assignee=who["user_id"] if mine else None,
+        # "Mine" is what this person can do now: assigned to them, or an
+        # unassigned recount of someone else's count.
+        return store.list_tasks(status=status, for_user=who["user_id"] if mine else None,
                                 location=location)
 
     @r.get("/api/tasks/{task_id}")

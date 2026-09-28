@@ -89,42 +89,78 @@ def token_hash(token: str) -> str:
 class LoginThrottle:
     """Slow down password guessing, per username and per client address.
 
-    Five free failures, then each further failure doubles a lockout
-    (capped at 15 minutes). Memory only: a restart forgives, which is fine
-    for a speed bump whose job is to make online guessing impractical.
+    Each key gets some free failures, then each further failure doubles a
+    lockout (capped at 15 minutes). Failures are forgotten after WINDOW_S
+    without one, so a lockout can never become permanent.
+
+    The client limit is much looser than the username limit on purpose:
+    one address is often a whole shop behind one router (or, if the proxy
+    is misconfigured, every user at once), and a stranger's typos must not
+    lock everyone out. The username limit is what stops guessing one
+    account; the client limit only stops one address spraying many.
+
+    Memory only, and bounded: a restart forgives, which is fine for a speed
+    bump whose job is to make online guessing impractical.
     """
 
-    FREE = 5
+    FREE_USER = 5
+    FREE_CLIENT = 50
     MAX_LOCK_S = 900
+    WINDOW_S = 900
+    MAX_KEYS = 10_000
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._fails: dict[str, tuple[int, float]] = {}
+        # key -> (failures, locked until, last failure)
+        self._fails: dict[str, tuple[int, float, float]] = {}
 
-    def _keys(self, username: str, client: str) -> list[str]:
-        return [f"u:{username.lower()}", f"c:{client}"]
+    @staticmethod
+    def _user_key(username: str) -> str:
+        return f"u:{username.strip().lower()}"
+
+    def _keys(self, username: str, client: str) -> list[tuple[str, int]]:
+        return [(self._user_key(username), self.FREE_USER), (f"c:{client}", self.FREE_CLIENT)]
+
+    def _live(self, key: str, now: float) -> tuple[int, float, float] | None:
+        entry = self._fails.get(key)
+        if entry is not None and now - entry[2] > self.WINDOW_S and entry[1] <= now:
+            del self._fails[key]  # quiet long enough: forgiven
+            return None
+        return entry
 
     def retry_after(self, username: str, client: str) -> float:
         now = time.time()
         with self._lock:
-            waits = [until - now for k in self._keys(username, client)
-                     if (entry := self._fails.get(k)) and (until := entry[1]) > now]
+            waits = [entry[1] - now for k, _ in self._keys(username, client)
+                     if (entry := self._live(k, now)) and entry[1] > now]
         return max(waits, default=0.0)
 
     def failed(self, username: str, client: str) -> None:
         now = time.time()
         with self._lock:
-            for k in self._keys(username, client):
-                count, _ = self._fails.get(k, (0, 0.0))
-                count += 1
-                lock = 0.0
-                if count > self.FREE:
-                    lock = min(self.MAX_LOCK_S, 2 ** (count - self.FREE))
-                self._fails[k] = (count, now + lock)
+            if len(self._fails) >= self.MAX_KEYS:
+                self._prune(now)
+            for k, free in self._keys(username, client):
+                entry = self._live(k, now)
+                count = (entry[0] if entry else 0) + 1
+                lock = min(self.MAX_LOCK_S, 2 ** (count - free)) if count > free else 0.0
+                self._fails[k] = (count, now + lock, now)
 
     def succeeded(self, username: str, client: str) -> None:
+        # Only the account is cleared: a guesser with one valid account of
+        # its own must not be able to wipe its address's record by signing in.
         with self._lock:
-            self._fails.pop(f"u:{username.lower()}", None)
+            self._fails.pop(self._user_key(username), None)
+
+    def _prune(self, now: float) -> None:
+        for k in [k for k, (_, until, last) in self._fails.items()
+                  if until <= now and now - last > self.WINDOW_S]:
+            del self._fails[k]
+        if len(self._fails) >= self.MAX_KEYS:
+            # Still full of live entries (a flood): drop the oldest half.
+            oldest = sorted(self._fails, key=lambda k: self._fails[k][2])
+            for k in oldest[: len(oldest) // 2]:
+                del self._fails[k]
 
 
 # -- keys on disk --------------------------------------------------------------
