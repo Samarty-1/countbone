@@ -48,11 +48,30 @@ interface NavItem {
   role?: Role;
   badge?: number;
   tone?: "warn" | "accent";
+  disabled?: boolean;
 }
 
 const RANK: Record<Role, number> = { counter: 0, manager: 1, admin: 2 };
 
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+  if (item.disabled) {
+    return (
+      <a
+        className={cn(
+          "flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] transition-colors pointer-coarse:h-11",
+          "opacity-50 cursor-not-allowed pointer-events-none text-subtle",
+        )}
+        title="Coming soon — feature complete, not activated"
+        aria-disabled="true"
+      >
+        <item.icon size={15} aria-hidden className="text-subtle" />
+        <span className="flex-1 truncate">{item.label}</span>
+        <span className="rounded px-1.5 font-mono text-[10px] tabular bg-warn/15 text-warn">
+          Soon
+        </span>
+      </a>
+    );
+  }
   return (
     <a
       href={pageHref(item.page)}
@@ -137,7 +156,7 @@ export function Sidebar({ route }: { route: Route }) {
     {
       title: "Operate",
       items: [
-        { page: "receive", label: "Receive", icon: Truck },
+        { page: "receive", label: "Receive", icon: Truck, disabled: true, tone: "warn" },
         { page: "locations", label: "Locations", icon: MapPin },
         { page: "studio", label: "Catalog studio", icon: Camera },
       ],

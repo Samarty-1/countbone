@@ -1,0 +1,10 @@
+capture:
+  adaptive: false
+  every_n_frames: 20
+count:
+  strategy: peak_frame
+detect:
+  backend: contour
+identify:
+  backend: auto
+plugins: []

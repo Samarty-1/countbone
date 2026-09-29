@@ -1,0 +1,16 @@
+count:
+  strategy: tracking
+detect:
+  backend: contour
+identify:
+  backend: auto
+plugins:
+- name: multiframe
+- name: confidence
+- name: tolerance
+- name: shelf_check
+- name: review_queue
+- name: exception_report
+- name: contact_sheet
+- name: audit_pack
+- name: location_tag

@@ -1,0 +1,7 @@
+count:
+  strategy: tracking
+detect:
+  backend: contour
+identify:
+  backend: auto
+plugins: []
