@@ -207,7 +207,9 @@ def sap_server(book: dict[str, int], patched: dict[str, str], created: list[list
             return httpx.Response(200, headers={"etag": "e"}, json={"d": {}})
         if req.method == "PATCH":
             item = path.split("PhysicalInventoryDocumentItem='")[1].split("'")[0]
-            patched[item] = json.loads(req.content)["QuantityInUnitOfEntry"]
+            body = json.loads(req.content)
+            patched[item] = ("zero" if body.get("PhysicalInventoryItemIsZero")
+                             else body["QuantityInUnitOfEntry"])
             return httpx.Response(204)
         if path.endswith("/PostDifferences"):
             return httpx.Response(200, json={"d": {}})
@@ -241,6 +243,16 @@ def test_sap_refuses_a_count_that_would_go_below_zero():
         Adjustment("adj_y", "A1", "SKU-YEL", 5, 6, 1)])}
     assert not res["adj_r"].ok and "would leave -3" in res["adj_r"].error
     assert res["adj_y"].ok and patched == {"1": "6"}
+
+
+def test_sap_enters_a_count_of_zero_with_the_zero_count_flag():
+    """A bare quantity of 0 leaves a physical inventory item uncounted in SAP."""
+    patched: dict[str, str] = {}
+    sap = build("sap", {"base_url": "https://s4", "default_location": "1010/0001"},
+                {"username": "u", "password": "p"},
+                client(sap_server({"SKU-RED": 4}, patched, [])))
+    [res] = sap.push_adjustments([Adjustment("adj_0", "A1", "SKU-RED", 4, 0, -4)])
+    assert res.ok and patched == {"1": "zero"}
 
 
 @pytest.mark.parametrize("kind,settings,secrets", [

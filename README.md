@@ -38,18 +38,18 @@ countbone demo
 ```
 synthetic shelf: examples/demo_shelf.webm  (34 units, 144 frames)
 
-run run_ad7e76965deb  (1.30s)
-frames: 26 used, 3 dropped  detections: 388  tracks: 34
+run run_230be74a70aa  (2.52s)
+frames: 53 used, 6 dropped  detections: 826  tracks: 34
 
   SKU             count  expected   var   conf  truth   err
   ---------------------------------------------------------
   SKU-BLU            11        11    +0    94%     11    +0
   SKU-GRN             8         8    +0    97%      8    +0
-  SKU-RED            10        10    +0    95%     10    +0
+  SKU-RED            10        10    +0    98%     10    +0
   SKU-YEL             5         5    +0    97%      5    +0
   TOTAL              34
 
-confidence: 95%   needs review: no (0 item(s))
+confidence: 96%   needs review: no (0 item(s))
 
 absolute count error: 0 of 34 (0.0%)
 ```
@@ -125,8 +125,11 @@ Each stage does one thing and is replaceable.
 
 Counting is the hard part, and it is the part most systems get wrong. A camera panning an aisle
 moves every box at once, so `stages/motion.py` estimates the global camera displacement between
-frames by phase correlation and the tracker predicts each box forward by it. Without that step,
-the demo above counts 52 instead of 34 — one carton becomes several. With it, 34. Motion is tracked through frames the quality gate drops, too: skipping it split every carton in view at a dropped frame (see `docs/ARCHITECTURE.md`).
+frames by phase correlation and the tracker predicts each box forward by it. With today's
+defaults the demo above counts 34 either way, because adaptive sampling already keeps each step
+small; the step earns its place when frames are sampled at a fixed stride. With adaptive
+sampling off (every 5th frame), the demo counts 52 without it and 34 with it — one carton
+becomes several. Motion is tracked through frames the quality gate drops, too: skipping it split every carton in view at a dropped frame (see `docs/ARCHITECTURE.md`).
 
 ## The plugins
 

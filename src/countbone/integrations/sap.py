@@ -192,10 +192,12 @@ class SapConnector(Connector):
                                       headers={"Accept": "application/json"})
             self._raise_for(current, "SAP read item")
             etag = current.headers.get("etag") or current.json()["d"].get("__metadata", {}).get("etag")
-            counted = self._write("PATCH", f"{PI}/A_PhysInventoryDocItem{key}", {
-                "QuantityInUnitOfEntry": str(qty),
-                "UnitOfEntry": unit,
-            }, etag=etag)
+            # A quantity of 0 alone leaves the item uncounted; SAP needs its
+            # zero-count flag instead (SAP KBA 2916936).
+            entry = ({"PhysicalInventoryItemIsZero": True} if qty == 0
+                     else {"QuantityInUnitOfEntry": str(qty)})
+            counted = self._write("PATCH", f"{PI}/A_PhysInventoryDocItem{key}",
+                                  {**entry, "UnitOfEntry": unit}, etag=etag)
             self._raise_for(counted, f"SAP enter count for {sku}")
 
         # 3. Post the differences SAP computed.

@@ -71,12 +71,20 @@ compensation**: `stages/motion.py` estimates the camera's displacement between f
 correlation on a downscaled greyscale copy, and each track is predicted forward by that
 displacement before overlap is measured.
 
-The effect on the bundled demo (34 units of ground truth):
+The effect on the bundled demo (34 units of ground truth), measured by patching the tracker to
+ignore camera motion as `examples/benchmark_configs.py` does:
 
-| | counted | error |
+| sampling | without motion compensation | with motion compensation |
 | --- | ---: | ---: |
-| without motion compensation | 52 | +53% |
-| with motion compensation | 34 | 0% |
+| adaptive (the default) | 34 (0%) | 34 (0%) |
+| fixed, every 5th frame (`test_configs/no_adaptive.yaml`) | 52 (+53%) | 34 (0%) |
+| fixed, every 10th frame (`test_configs/stride_10.yaml`) | 29 (−15%) | 34 (0%) |
+
+Adaptive sampling picks frames so the camera moves about a quarter of a frame between them, and
+at that step plain IoU association holds on this demo, and on the five benchmark shelves too
+(`python examples/benchmark_configs.py`: `no_motion_comp` 5/5 exact, 0 of 181 units off). Motion compensation is what keeps the
+count right when frames arrive at a fixed stride. Without it, one stride overcounts (52) and
+a sparser one undercounts (29).
 
 Motion must be accumulated through **every** frame, including those the quality gate drops.
 An earlier version only applied motion on frames that reached the tracker, so each dropped frame
