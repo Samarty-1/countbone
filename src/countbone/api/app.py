@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 
 from ..catalog import Catalog
 from ..config import Config
-from ..ops import Forbidden, OpsError, Services
+from ..ops import Forbidden, OpsError, Services, checkpoints
 from ..ops import catalog as catalog_ops
 from ..pipeline import Pipeline
 from ..security import Keyring, LoginThrottle
@@ -157,6 +157,7 @@ def create_app(
             if resumed:
                 log.info("resumed %d queued run(s) from before the restart", resumed)
         db.purge_expired_sessions()
+        checkpoints.write(services, "startup")
         sweep = ctx.extra.get("expire_stale_uploads")
         if sweep:
             sweep(force=True)  # partial files of uploads abandoned while the server was down

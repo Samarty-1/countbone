@@ -43,6 +43,10 @@ export const useMe = () => useAuth().data?.user ?? null;
 export const useHealth = () =>
   useQuery({ queryKey: keys.health, queryFn: api.health, staleTime: 60_000, retry: 1 });
 
+/** Which modules are on. Undefined while loading: callers hide, not flash. */
+export const useModules = () =>
+  useQuery({ queryKey: keys.settings, queryFn: api.settings, staleTime: 60_000 }).data?.modules;
+
 export const useCatalog = () => useQuery({ queryKey: keys.catalog, queryFn: api.catalog, staleTime: 30_000 });
 
 export const useRuns = (filters: { location?: string; kind?: string; limit?: number } = {}) =>

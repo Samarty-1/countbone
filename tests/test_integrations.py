@@ -68,7 +68,7 @@ def test_shopify_user_errors_fail_the_adjustment_not_the_batch():
 def test_shopify_refuses_per_bay_book_stock_for_shared_locations():
     shop = build("shopify", {"shop": "a.myshopify.com", "default_location": "L"},
                  {"access_token": "t"}, client(lambda r: httpx.Response(500)))
-    with pytest.raises(IntegrationError, match="share a Shopify location"):
+    with pytest.raises(IntegrationError, match="share one with another bay"):
         shop.pull_expected({"A1": ["X"], "A2": ["X"]})
 
 
@@ -161,6 +161,10 @@ def test_sap_creates_counts_and_posts_a_physical_inventory_document():
                                                    "to_PhysicalInventoryDocumentItem": {"results": [
                                                        {"Material": "SKU-RED",
                                                         "PhysicalInventoryDocumentItem": "1"}]}}})
+        if req.method == "GET" and path.endswith("/A_MatlStkInAcctMod"):
+            assert "Material eq 'SKU-RED'" in req.url.params["$filter"]
+            return httpx.Response(200, json={"d": {"results": [
+                {"MatlWrhsStkQtyInMatlBaseUnit": "10.000"}]}})
         if req.method == "GET" and "A_PhysInventoryDocItem" in path:
             return httpx.Response(200, headers={"etag": 'W/"x1"'}, json={"d": {}})
         if req.method == "PATCH":
@@ -177,7 +181,93 @@ def test_sap_creates_counts_and_posts_a_physical_inventory_document():
                 {"username": "u", "password": "p"}, client(handler))
     [res] = sap.push_adjustments([Adjustment("adj_s", "A1", "SKU-RED", 10, 8, -2)])
     assert res.ok and res.external_ref == "2026/100000123"
-    assert [m for m, _, _ in seen] == ["GET", "POST", "GET", "PATCH", "POST"]
+    assert [m for m, _, _ in seen] == ["GET", "GET", "POST", "GET", "PATCH", "POST"]
+
+
+def sap_server(book: dict[str, int], patched: dict[str, str], created: list[list[str]]):
+    """A minimal S/4 physical-inventory service: book stock, one document, counts."""
+    def handler(req: httpx.Request) -> httpx.Response:
+        path = req.url.path
+        if req.headers.get("x-csrf-token") == "Fetch":
+            return httpx.Response(200, headers={"x-csrf-token": "t"})
+        if path.endswith("/A_MatlStkInAcctMod"):
+            sku = req.url.params["$filter"].split("Material eq '")[1].split("'")[0]
+            return httpx.Response(200, json={"d": {"results": [
+                {"MatlWrhsStkQtyInMatlBaseUnit": str(book[sku])}]}})
+        if path.endswith("/A_PhysInventoryDocHeader"):
+            mats = [i["Material"] for i in json.loads(req.content)
+                    ["to_PhysicalInventoryDocumentItem"]["results"]]
+            created.append(mats)
+            return httpx.Response(201, json={"d": {
+                "FiscalYear": "2026", "PhysicalInventoryDocument": "7",
+                "to_PhysicalInventoryDocumentItem": {"results": [
+                    {"Material": m, "PhysicalInventoryDocumentItem": str(n + 1)}
+                    for n, m in enumerate(mats)]}}})
+        if req.method == "GET" and "A_PhysInventoryDocItem" in path:
+            return httpx.Response(200, headers={"etag": "e"}, json={"d": {}})
+        if req.method == "PATCH":
+            item = path.split("PhysicalInventoryDocumentItem='")[1].split("'")[0]
+            patched[item] = json.loads(req.content)["QuantityInUnitOfEntry"]
+            return httpx.Response(204)
+        if path.endswith("/PostDifferences"):
+            return httpx.Response(200, json={"d": {}})
+        raise AssertionError(f"unexpected {req.method} {req.url}")
+    return handler
+
+
+def test_sap_bays_sharing_a_storage_location_add_up_instead_of_overwriting():
+    """Regression: two bays in 1010/0001 each entered their own count of the
+    same material, both on one document item, so SAP's book for the whole
+    storage location became one bay's count and every other bay's stock went."""
+    patched: dict[str, str] = {}
+    created: list[list[str]] = []
+    sap = build("sap", {"base_url": "https://s4", "default_location": "1010/0001"},
+                {"username": "u", "password": "p"},
+                client(sap_server({"SKU-RED": 40}, patched, created)))
+    res = sap.push_adjustments([Adjustment("adj_1", "A1", "SKU-RED", 10, 8, -2),
+                                Adjustment("adj_2", "A2", "SKU-RED", 6, 7, 1)])
+    assert all(r.ok for r in res)
+    assert created == [["SKU-RED"]]           # one item per material
+    assert patched == {"1": "39"}             # 40 on the book, -2 and +1 counted
+
+
+def test_sap_refuses_a_count_that_would_go_below_zero():
+    patched: dict[str, str] = {}
+    sap = build("sap", {"base_url": "https://s4", "default_location": "1010/0001"},
+                {"username": "u", "password": "p"},
+                client(sap_server({"SKU-RED": 1, "SKU-YEL": 5}, patched, [])))
+    res = {r.adjustment_id: r for r in sap.push_adjustments([
+        Adjustment("adj_r", "A1", "SKU-RED", 4, 0, -4),
+        Adjustment("adj_y", "A1", "SKU-YEL", 5, 6, 1)])}
+    assert not res["adj_r"].ok and "would leave -3" in res["adj_r"].error
+    assert res["adj_y"].ok and patched == {"1": "6"}
+
+
+@pytest.mark.parametrize("kind,settings,secrets", [
+    ("sap", {"base_url": "https://s4", "default_location": "1010/0001"},
+     {"username": "u", "password": "p"}),
+    ("netsuite", {"account_id": "1", "adjustment_account": "3", "default_location": "7"},
+     {"consumer_key": "a", "consumer_secret": "b", "token_id": "c", "token_secret": "d"}),
+])
+def test_per_location_book_stock_is_refused_for_bays_sharing_a_location(kind, settings, secrets):
+    """Regression: each bay got the whole location's quantity as its book, so
+    every bay showed a phantom shortage and raised an adjustment for it."""
+    conn = build(kind, settings, secrets, client(lambda r: httpx.Response(500)))
+    with pytest.raises(IntegrationError, match="A1, A2"):
+        conn.pull_expected({"A1": ["X"], "A2": ["X"]})
+    # One bay at a time cannot slip past: the check knows every bay there is.
+    with pytest.raises(IntegrationError, match="A1"):
+        conn.pull_expected({"A1": ["X"]}, known=["A1", "A2"])
+
+
+def test_a_bay_mapped_to_its_own_location_still_pulls_alongside_shared_ones():
+    shop = build("shopify", {"shop": "a.myshopify.com", "default_location": "L",
+                             "location_map": {"B1": "L2"}},
+                 {"access_token": "t"}, client(lambda r: httpx.Response(200, json={"data": {
+                     "productVariants": {"nodes": [{"sku": "X", "inventoryItem": {
+                         "id": "i", "inventoryLevel": {"quantities": [
+                             {"name": "available", "quantity": 3}]}}}]}}})))
+    assert shop.pull_expected({"B1": ["X"]}, known=["A1", "A2", "B1"]) == {"B1": {"X": 3}}
 
 
 def test_sap_without_a_mapping_fails_that_adjustment():

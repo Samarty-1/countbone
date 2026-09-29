@@ -165,3 +165,47 @@ def test_overlapping_hue_bands_pick_the_best_fit_not_the_first_entry():
     for order in ([wide, narrow], [narrow, wide]):
         item = identify_one((200, 110, 40), catalog=Catalog(list(order)))
         assert item.sku == "SKU-NARROW", f"order {[e.sku for e in order]} changed the answer"
+
+
+# -- barcodes --------------------------------------------------------------------------------
+_EAN_L = ["0001101", "0011001", "0010011", "0111101", "0100011",
+          "0110001", "0101111", "0111011", "0110111", "0001011"]
+_EAN_G = ["0100111", "0110011", "0011011", "0100001", "0011101",
+          "0111001", "0000101", "0010001", "0001001", "0010111"]
+_EAN_R = ["1110010", "1100110", "1101100", "1000010", "1011100",
+          "1001110", "1010000", "1000100", "1001000", "1110100"]
+_EAN_PARITY = ["LLLLLL", "LLGLGG", "LLGGLG", "LLGGGL", "LGLLGG",
+               "LGGLLG", "LGGGLL", "LGLGLG", "LGLGGL", "LGGLGL"]
+
+
+def ean13(code: str, module: int = 2) -> np.ndarray:
+    """A printed EAN-13, drawn from the standard's encoding tables."""
+    d = [int(c) for c in code]
+    bits = "101"
+    for i, c in enumerate(d[1:7]):
+        bits += (_EAN_L if _EAN_PARITY[d[0]][i] == "L" else _EAN_G)[c]
+    bits += "01010" + "".join(_EAN_R[c] for c in d[7:]) + "101"
+    quiet = 15
+    img = np.full((200, (len(bits) + 2 * quiet) * module), 255, np.uint8)
+    for i, b in enumerate(bits):
+        if b == "1":
+            img[20:180, (quiet + i) * module:(quiet + i + 1) * module] = 0
+    img = cv2.copyMakeBorder(img, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
+    return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+
+
+def test_a_legible_barcode_names_its_product():
+    code = "4006381333931"
+    catalog = Catalog([SkuEntry("PEN", "Pen", barcodes=[code]), SkuEntry("INK", "Ink")])
+    reader = identify.BarcodeReader(catalog)
+    patch = ean13(code)
+    assert reader.read(patch).sku == "PEN"
+    # A crop too narrow to resolve a 1D code is not even tried.
+    assert reader.read(cv2.resize(patch, (80, 60))) is None
+    # A code the catalog does not list names nothing.
+    assert identify.BarcodeReader(Catalog([SkuEntry("X", barcodes=["5012345678900"])])).read(patch) is None
+
+
+def test_barcodes_are_not_read_when_no_product_lists_one():
+    reader = identify.BarcodeReader(Catalog([SkuEntry("PEN", "Pen")]))
+    assert not reader.enabled and reader.read(ean13("4006381333931")) is None

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import integrations
-from ..ops import reconcile
+from ..ops import modules, reconcile
 from ..security import (
     ROLES,
     check_password_policy,
@@ -53,6 +53,7 @@ class PullExpected(BaseModel):
 
 class SettingsIn(BaseModel):
     organisation: str | None = Field(default=None, max_length=120)
+    modules: dict[str, bool] | None = None
 
 
 def router(ctx) -> APIRouter:
@@ -185,11 +186,12 @@ def router(ctx) -> APIRouter:
 
     @r.post("/api/integrations/{name}/pull-expected")
     def pull_expected(name: str, body: PullExpected, who: dict = Depends(require("manager"))) -> dict[str, Any]:
-        codes = body.locations or [loc["code"] for loc in store.list_locations()]
+        every = [loc["code"] for loc in store.list_locations()]
+        codes = body.locations or every
         skus = [e.sku for e in services.current_catalog().entries]
         wanted = {c: sorted(set(store.expected_for(c)) | set(skus)) for c in codes}
         try:
-            got = reconcile.connector_for(services, name).pull_expected(wanted)
+            got = reconcile.connector_for(services, name).pull_expected(wanted, known=every)
         except integrations.IntegrationError as exc:
             store.mark_integration(name, str(exc))
             raise HTTPException(502, str(exc)) from None
@@ -214,12 +216,16 @@ def router(ctx) -> APIRouter:
     def get_settings(_: dict = Depends(counter)) -> dict[str, Any]:
         return {"organisation": store.get_setting("organisation"),
                 "schema_version": store.schema_version,
-                "evidence_key_id": services.keyring.key_id()}
+                "evidence_key_id": services.keyring.key_id(),
+                "evidence_key_fingerprint": services.keyring.key_fingerprint(),
+                "modules": modules.modules(services)}
 
     @r.put("/api/settings")
     def put_settings(body: SettingsIn, who: dict = Depends(admin)) -> dict[str, Any]:
         if body.organisation is not None:
             store.set_setting("organisation", body.organisation.strip(), who["user_id"])
+        if body.modules is not None:
+            modules.set_modules(services, body.modules, who)
         store.add_audit("settings", "settings_saved", body.model_dump(), actor=who["username"])
         return get_settings(who)
 

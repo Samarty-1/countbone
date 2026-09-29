@@ -130,16 +130,20 @@ the demo above counts 52 instead of 34 — one carton becomes several. With it, 
 
 ## The plugins
 
-Six ship enabled by default; `tolerance` is opt-in because it needs expected counts.
+All ten ship enabled by default (`config.py`, `DEFAULT_PLUGINS`). `tolerance` and `shelf_check`
+only act when a count has expected numbers or a planogram.
 
 | Plugin | Layer | What it does |
 | --- | --- | --- |
 | `quality_gate` | capture | drops blurred, dark, blown-out frames and says why |
+| `location_tag` | capture | reads bay QR labels in the video and checks them against the bay chosen |
 | `multiframe` | pipeline | an object must be seen in ≥ N frames to count |
 | `confidence` | pipeline | scores every item, SKU and run; sets the review flag |
 | `tolerance` | analytics | which variances matter, banded by unit value |
+| `shelf_check` | analytics | empty facings and planogram differences |
 | `review_queue` | output | routes uncertain items to a human with evidence attached |
 | `exception_report` | output | writes `exceptions.md` / `exceptions.json` |
+| `contact_sheet` | output | saves the clearest crop of each counted object |
 | `audit_pack` | process | hashes source, config and artifacts into a manifest |
 
 ```bash
@@ -165,10 +169,15 @@ class ShrinkageAnalytics(Plugin):
         self.window = window
 
     def on_counts(self, ctx, result):
+        if ctx.store is None:                  # SQLite output is off: no history to compare
+            return result
         for sku_count in result.counts:
-            history = ctx.store.sku_history(sku_count.sku, limit=self.window)
-            counts = [h["count"] for h in history]
-            if len(counts) >= 3 and counts == sorted(counts):     # monotonic decline
+            # Newest first. This run is not stored yet (that happens after output), so
+            # it leads. History spans every bay; filter on h["location"] to go per bay.
+            past = ctx.store.sku_history(sku_count.sku, limit=self.window)
+            counts = [sku_count.count, *(h["count"] for h in past)]
+            # Strictly lower each time: 5, 5, 5 is steady, not shrinking.
+            if len(counts) >= 3 and all(a < b for a, b in zip(counts, counts[1:])):
                 result.warnings.append(f"{sku_count.sku} has fallen every count")
                 result.needs_review = True
         return result
@@ -204,7 +213,9 @@ cannot take the backbone down mid-count.
 - **The default detector is a classical baseline.** `contour` finds boxes by edges and contrast: it
   works on separated items against a contrasting background and degrades on dense, touching or
   occluded stock. For real stores, train a detector (the consented Count-as-a-Service footage
-  exports as COCO for exactly this) and use `detect.backend: yolo`.
+  exports as COCO for exactly this) and use `detect.backend: yolo` with those weights. The
+  `yolo` default, `yolov8n.pt`, is a COCO model with no retail classes: it runs, but it will not
+  find your stock.
 - **Product recognition is few-shot, not deep.** The photo index (OpenCV features, nearest
   exemplar, self-calibrated thresholds) separates look-alike packaging on the test range and
   flags products nobody photographed, but it is not a trained deep model; a learned embedder

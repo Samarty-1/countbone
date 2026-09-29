@@ -4,6 +4,7 @@ studio, service jobs, and durability across a restart."""
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -480,8 +481,35 @@ def test_approved_adjustments_post_through_a_webhook(config, tmp_path, scene):
 
 
 # -- receive and evidence ------------------------------------------------------------------------
+def receive_on(env) -> None:
+    res = env["admin"].put("/api/settings", json={"modules": {"receive": True}})
+    assert res.status_code == 200 and res.json()["modules"]["receive"] is True
+
+
+def test_receive_is_off_until_an_admin_switches_it_on_everywhere(env, scene):
+    """Regression: Receive was hidden in the dashboard only; its API and the
+    phone's delivery capture stayed live."""
+    admin, manager, counter = env["admin"], env["manager"], env["counter"]
+    assert counter.get("/api/settings").json()["modules"] == {"receive": False}
+    assert manager.get("/api/receipts").status_code == 404
+    made = manager.post("/api/receipts", json={"po_number": "PO-1", "lines": {"SKU-RED": {"qty": 1}}})
+    assert made.status_code == 404 and "switched off" in made.json()["detail"]
+    with open(scene.path, "rb") as fh:
+        res = counter.post("/api/runs/upload", files={"file": ("w.webm", fh, "video/webm")},
+                           data={"kind": "receive", "receipt_id": "rcp_x"})
+    assert res.status_code == 404 and "switched off" in res.json()["detail"]
+
+    assert manager.put("/api/settings", json={"modules": {"receive": True}}).status_code == 403
+    bad = admin.put("/api/settings", json={"modules": {"teleport": True}})
+    assert bad.status_code == 400 and "unknown module" in bad.json()["detail"]
+    receive_on(env)
+    assert manager.get("/api/receipts").status_code == 200
+    assert TestClient(env["app"]).get("/api/receipts").status_code == 401
+
+
 def test_a_short_delivery_drafts_a_claim_with_a_verifiable_pack(env, scene):
     manager, counter, store = env["manager"], env["counter"], env["store"]
+    receive_on(env)
     lines = {sku: {"qty": n, "unit_cost": 2.0} for sku, n in scene.truth.items()}
     lines["SKU-BLU"]["qty"] += 2   # ordered two more than arrived
     receipt = manager.post("/api/receipts", json={"po_number": "PO-1001", "supplier": "Acme",
@@ -527,8 +555,42 @@ def test_a_short_delivery_drafts_a_claim_with_a_verifiable_pack(env, scene):
     pack.write_bytes(data)
     script = env["tmp"] / "verify.py"
     script.write_bytes(src.read("verify.py"))
-    out = subprocess.run([sys.executable, str(script), str(pack)], capture_output=True, text=True)
-    assert out.returncode == 0 and "signature: OK" in out.stdout
+    fingerprint = manager.get("/api/settings").json()["evidence_key_fingerprint"]
+
+    def check(path, *args):
+        return subprocess.run([sys.executable, str(script), str(path), *args],
+                              capture_output=True, text=True)
+
+    out = check(pack, "--key", fingerprint)
+    assert out.returncode == 0 and "signature: OK" in out.stdout and "origin: OK" in out.stdout
+    # Without the pinned key it cannot say who signed, and says so.
+    out = check(pack)
+    assert out.returncode == 2 and "origin: UNCHECKED" in out.stdout and fingerprint in out.stdout
+
+    # Regression: the checker trusted the key inside the pack, so a pack
+    # altered and re-signed with any key verified as genuine.
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    forger = Ed25519PrivateKey.generate()
+    pem = forger.public_key().public_bytes(serialization.Encoding.PEM,
+                                           serialization.PublicFormat.SubjectPublicKeyInfo).decode()
+    manifest = json.loads(src.read("manifest.json"))
+    report = src.read("report.html").replace(b"Acme", b"Acmf")
+    manifest["files"]["report.html"] = hashlib.sha256(report).hexdigest()
+    mbytes = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    sig = {**json.loads(src.read("signature.json")), "public_key_pem": pem,
+           "signature": base64.b64encode(forger.sign(mbytes)).decode(),
+           "manifest_sha256": hashlib.sha256(mbytes).hexdigest()}
+    forged = env["tmp"] / "forged.zip"
+    with zipfile.ZipFile(forged, "w") as out_zip:
+        for n in src.namelist():
+            body = {"report.html": report, "manifest.json": mbytes,
+                    "signature.json": json.dumps(sig).encode()}.get(n) or src.read(n)
+            out_zip.writestr(n, body)
+    out = check(forged, "--key", fingerprint)
+    assert out.returncode == 1 and "origin: DIFFERENT KEY" in out.stdout
+    assert not manager.post("/api/evidence/verify",
+                            files={"file": ("f.zip", forged.read_bytes())}).json()["ok"]
 
     # Closing a delivery with discrepancies is a manager's call.
     assert counter.post(f"/api/receipts/{receipt['receipt_id']}/close", json={}).status_code == 403
@@ -539,6 +601,7 @@ def test_a_short_delivery_drafts_a_claim_with_a_verifiable_pack(env, scene):
 
 def test_a_receipt_can_be_imported_from_csv(env):
     m = env["manager"]
+    receive_on(env)
     csv = "Item,Quantity,Unit Price\nSKU-RED,10,4.50\nSKU-BLU,5,5.10\n"
     res = m.post("/api/receipts/import", data={"po_number": "PO-7", "supplier": "Z"},
                  files={"file": ("po.csv", csv.encode())})
@@ -681,3 +744,53 @@ def test_a_v1_database_upgrades_in_place(tmp_path):
     chain = store.verify_audit_chain()
     assert chain["ok"] and chain["legacy_rows"] == 1 and chain["checked"] == 1
     store.close()
+
+
+def test_signed_checkpoints_catch_a_rewritten_or_truncated_audit_trail(env):
+    """Regression: the chain is unkeyed, so someone who could write the
+    database could edit a row and recompute every hash, or drop the newest
+    rows, and verification still passed."""
+    from countbone.store.db import GENESIS, _chain_hash
+
+    admin, manager, store = env["admin"], env["manager"], env["store"]
+    for n in range(3):
+        manager.post("/api/locations", json={"code": f"K{n}"})
+    assert manager.post("/api/audit/checkpoint").status_code == 403
+    made = admin.post("/api/audit/checkpoint")
+    assert made.status_code == 201 and made.json()["verify"]["ok"]
+    assert manager.get("/api/audit/verify").json()["checkpoints"] >= 2  # start-up + this one
+
+    def rewrite(rows):
+        """What an attacker with the database does: rechain everything."""
+        con = store._conn
+        con.execute("DELETE FROM audit")
+        prev = GENESIS
+        for r in rows:
+            h = _chain_hash(prev, r["run_id"], r["kind"], r["payload"], r["created_at"], r["actor"])
+            con.execute("INSERT INTO audit (run_id, kind, payload, created_at, actor, prev_hash, "
+                        "row_hash) VALUES (?,?,?,?,?,?,?)",
+                        (r["run_id"], r["kind"], r["payload"], r["created_at"], r["actor"], prev, h))
+            prev = h
+        con.commit()
+
+    rows = store._rows("SELECT * FROM audit ORDER BY id")
+    edited = [dict(r) for r in rows]
+    edited[1]["payload"] = '{"code": "K9"}'
+    rewrite(edited)
+    assert store.verify_audit_chain()["ok"]             # the bare chain is fooled
+    got = manager.get("/api/audit/verify").json()
+    assert not got["ok"] and "rewritten" in got["problem"]
+
+    rewrite([dict(r) for r in rows][:-1])               # restore, minus the newest
+    got = manager.get("/api/audit/verify").json()
+    assert not got["ok"] and "deleted" in got["problem"]
+
+    rewrite([dict(r) for r in rows])                    # the original trail checks again
+    assert manager.get("/api/audit/verify").json()["ok"]
+
+    # A checkpoint someone else signed is refused, not trusted.
+    path = env["tmp"] / "data" / "audit_checkpoints.jsonl"
+    path.write_text(path.read_text() + json.dumps(
+        {"rows": 1, "head": "f" * 64, "at": 0, "reason": "x", "key_id": "x", "signature": "AAAA"}) + "\n")
+    got = manager.get("/api/audit/verify").json()
+    assert not got["ok"] and "not signed" in got["problem"]

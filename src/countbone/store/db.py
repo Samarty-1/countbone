@@ -120,9 +120,16 @@ class Store(AccessRepo, CatalogRepo, OpsRepo):
                 (run_id, kind, body, now, actor, prev, row_hash),
             )
 
-    def verify_audit_chain(self) -> dict[str, Any]:
+    def verify_audit_chain(self, checkpoints: Iterable[dict[str, Any]] = ()) -> dict[str, Any]:
         """Recompute every link. Any edit, deletion or insertion shows up as
-        the first row whose stored hash no longer matches."""
+        the first row whose stored hash no longer matches.
+
+        The chain alone cannot catch someone who can write the database: they
+        can recompute every hash after an edit, or delete the newest rows.
+        `checkpoints` ({rows, head}, signed and kept outside the database)
+        catch both: the chain must still pass through each one."""
+        wanted = {int(c["rows"]): c["head"] for c in checkpoints}
+        seen: dict[int, str] = {0: GENESIS} if 0 in wanted else {}
         rows = self._rows("SELECT * FROM audit ORDER BY id")
         prev = GENESIS
         checked = legacy = 0
@@ -140,7 +147,26 @@ class Store(AccessRepo, CatalogRepo, OpsRepo):
                         "broken_at": row["id"], "problem": "this row was altered"}
             prev = row["row_hash"]
             checked += 1
-        return {"ok": True, "checked": checked, "legacy_rows": legacy, "head": prev}
+            if checked in wanted:
+                seen[checked] = prev
+        for n, head in sorted(wanted.items()):
+            if n > checked:
+                return {"ok": False, "checked": checked, "legacy_rows": legacy,
+                        "problem": f"a checkpoint saw {n} events; only {checked} remain, "
+                                   "so the newest were deleted"}
+            if seen.get(n) != head:
+                return {"ok": False, "checked": checked, "legacy_rows": legacy,
+                        "problem": f"the trail up to event {n} was rewritten since a checkpoint"}
+        return {"ok": True, "checked": checked, "legacy_rows": legacy, "head": prev,
+                "checkpoints_matched": len(wanted)}
+
+    def audit_head(self) -> dict[str, Any]:
+        """{rows, head}: how many chained events there are and the last hash."""
+        # One statement, so an event written meanwhile cannot split the pair.
+        row = self._one(
+            "SELECT COUNT(*) AS n, (SELECT row_hash FROM audit WHERE row_hash IS NOT NULL "
+            "ORDER BY id DESC LIMIT 1) AS head FROM audit WHERE row_hash IS NOT NULL")
+        return {"rows": int(row["n"]), "head": row["head"] or GENESIS}
 
     def audit_trail(self, run_id: str) -> list[dict[str, Any]]:
         rows = self._rows(

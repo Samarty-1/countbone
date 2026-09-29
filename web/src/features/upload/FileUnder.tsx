@@ -1,7 +1,7 @@
 import { MapPin } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { keys } from "@/lib/queries";
+import { keys, useModules } from "@/lib/queries";
 import { Card, CardHeader, Field, Select } from "@/components/ui";
 
 export interface Target {
@@ -32,12 +32,15 @@ export function readTarget(): Target {
 }
 
 export function FileUnder({ value, onChange }: { value: Target; onChange: (t: Target) => void }) {
+  const modules = useModules();
   const locations = useQuery({ queryKey: keys.locations, queryFn: api.locations });
-  const receipts = useQuery({ queryKey: keys.receipts, queryFn: () => api.receipts(), enabled: value.kind === "receive" });
+  const receipts = useQuery({ queryKey: keys.receipts, queryFn: () => api.receipts(), enabled: value.kind === "receive" && !!modules?.receive });
   const tasks = useQuery({ queryKey: keys.tasks({ status: "open" }), queryFn: () => api.tasks({ status: "open" }), enabled: value.kind === "recount" });
   const walks = useQuery({ queryKey: keys.walks, queryFn: () => api.walks() });
   const jobs = useQuery({ queryKey: keys.serviceJobs, queryFn: () => api.serviceJobs() });
   const set = (patch: Partial<Target>) => onChange({ ...value, ...patch });
+  // Kept while already chosen (an old ?receipt= link), so the server's refusal is what explains it.
+  const canReceive = modules?.receive || value.kind === "receive";
   const openReceipts = (receipts.data ?? []).filter((r) => r.status !== "closed");
   const openWalks = (walks.data ?? []).filter((w) => w.status === "open");
   const activeJobs = (jobs.data ?? []).filter((j) => j.status === "planned" || j.status === "in_progress");
@@ -49,7 +52,7 @@ export function FileUnder({ value, onChange }: { value: Target; onChange: (t: Ta
         <Field label="What it is">
           <Select value={value.kind} onChange={(e) => set({ kind: e.target.value as Target["kind"] })}>
             <option value="count">A cycle count of a bay</option>
-            <option value="receive">A delivery being received</option>
+            {canReceive && <option value="receive">A delivery being received</option>}
             <option value="recount">A recount for a task</option>
           </Select>
         </Field>

@@ -88,11 +88,35 @@ class Connector:
                     return value
         return self.settings.get("default_location")
 
+    def shared_targets(self, bays: list[str]) -> list[str]:
+        """Bays that map to the same place in the other system as another bay."""
+        targets: dict[str, list[str]] = {}
+        for bay in bays:
+            if (t := self.target_location(bay)):
+                targets.setdefault(t, []).append(bay)
+        return sorted(b for group in targets.values() if len(group) > 1 for b in group)
+
+    def refuse_shared_book(self, bays: list[str], known: list[str] | None = None) -> None:
+        """A system that keeps stock per location, not per bay, cannot give a
+        bay its book when bays share that location: each bay would get the
+        whole location's quantity, show a phantom shortage, and raise an
+        adjustment for it. `known` is every bay there is, so pulling one bay
+        at a time cannot slip past the check."""
+        everyone = self.shared_targets(sorted(set(bays) | set(known or [])))
+        shared = [b for b in everyone if b in set(bays)]
+        if shared:
+            raise IntegrationError(
+                f"{self.label} keeps stock per location, but these bays share one with "
+                f"another bay: {', '.join(shared[:6])}. Import per-bay quantities from CSV "
+                "instead, or map each bay to its own location."
+            )
+
     def test(self) -> dict[str, Any]:
         raise NotImplementedError
 
-    def pull_expected(self, locations: dict[str, list[str]]) -> dict[str, dict[str, int]]:
-        """{bay_code: [skus]} -> {bay_code: {sku: qty}}."""
+    def pull_expected(self, locations: dict[str, list[str]],
+                      known: list[str] | None = None) -> dict[str, dict[str, int]]:
+        """{bay_code: [skus]} -> {bay_code: {sku: qty}}. `known`: all bay codes."""
         raise IntegrationError(f"{self.label} cannot read stock levels")
 
     def push_adjustments(self, adjustments: list[Adjustment]) -> list[PostResult]:

@@ -101,7 +101,6 @@ def _lookalike_catalog(skip: str | None = None) -> Catalog:
 
 def test_photos_tell_apart_products_colour_cannot(media, tmp_path):
     scene = demo.make_demo_video(media / "look.webm", seed=5, palette="lookalike")
-    colour = Pipeline(_cfg(tmp_path), catalog_provider=lambda: _lookalike_catalog()).run
     photos_catalog = _lookalike_catalog()
     with_photos = Pipeline(_cfg(tmp_path), catalog_provider=lambda: photos_catalog)
     assert with_photos.identifier.name == "appearance"
@@ -113,7 +112,6 @@ def test_photos_tell_apart_products_colour_cannot(media, tmp_path):
     colour_only = Pipeline(cfg, catalog_provider=lambda: _lookalike_catalog()).run(scene.path)
     colour_counts = {c.sku: c.count for c in colour_only.counts if c.count}
     assert colour_counts != scene.truth, "the look-alike range should defeat colour matching"
-    del colour
 
 
 def test_an_unenrolled_look_alike_is_flagged_not_misfiled(media, tmp_path):

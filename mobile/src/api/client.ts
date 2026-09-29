@@ -263,6 +263,8 @@ export const api = {
   health: () => request<{ status: string; version: string; identify: string }>('/api/health', {}, 5000),
 
   locations: () => request<Location[]>('/api/locations'),
+  /** Site settings; `modules` says which product areas are switched on. */
+  settings: () => request<{ organisation: string | null; modules: { receive: boolean } }>('/api/settings'),
   receipts: () => request<Receipt[]>('/api/receipts'),
   tasks: (mine = true) => request<Task[]>(`/api/tasks${qs({ status: 'open', mine })}`),
   completeTask: (id: string, count: number, note?: string) =>

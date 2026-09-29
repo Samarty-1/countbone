@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from ..catalog import SkuEntry
 from ..ops import catalog as catalog_ops
-from ..ops import postrun
+from ..ops import modules, postrun
 from ..ops.final import final_counts
 from ..ops.merge import merge, objects_from_run
 from ..plugins import base as plugin_base
@@ -31,6 +31,10 @@ from .auth import current_principal, require
 MAX_UPLOAD_BYTES = 8 * 1024**3        # 8 GiB: a long 4K walk, not a disk-filling attack
 CHUNK_LIMIT = 64 * 1024**2            # per resumable PUT
 UPLOAD_TTL_S = 7 * 86400              # an upload untouched this long is abandoned
+# What new_id("run") makes, and what tests and the CLI name runs: no dots or
+# separators, so a run id can never climb out of (or sideways within) the
+# output directory, which also holds _uploads and, in some layouts, the keys.
+RUN_ID = re.compile(r"run_[A-Za-z0-9_-]{1,64}")
 
 
 def _swatch(entry: SkuEntry) -> str | None:
@@ -100,6 +104,8 @@ def router(ctx) -> APIRouter:
         if location and store.get_location(location) is None:
             raise HTTPException(404, f"unknown location {location}; add it under Locations first")
         if kind == "receive":
+            if not modules.modules(ctx.services)["receive"]:
+                raise HTTPException(404, "Receive is switched off for this site (Settings, Modules)")
             receipt = store.get_receipt(receipt_id or "")
             if receipt is None:
                 raise HTTPException(404, "a receiving video needs an open receipt")
@@ -412,11 +418,17 @@ def router(ctx) -> APIRouter:
 
     @r.get("/api/runs/{run_id}/artifacts/{path:path}")
     def artifact(run_id: str, path: str, _: dict = Depends(counter)) -> FileResponse:
-        root = (Path(cfg.output.dir) / run_id).resolve()
+        # Both halves are confined. The run id picks the root, so checking only
+        # the path against it let "%2E%2E" as the run id make the root the
+        # output directory's parent: the database and the keys.
+        if not RUN_ID.fullmatch(run_id):
+            raise HTTPException(404, "artifact not found")
+        out = Path(cfg.output.dir).resolve()
+        root = (out / run_id).resolve()
         target = (root / path).resolve()
         # is_relative_to, not startswith: "runs/run_1" is a string prefix of
         # "runs/run_10", so a prefix check would let one run read another's.
-        if not target.is_relative_to(root) or not target.is_file():
+        if root.parent != out or not target.is_relative_to(root) or not target.is_file():
             raise HTTPException(404, "artifact not found")
         return FileResponse(target)
 

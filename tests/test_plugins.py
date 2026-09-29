@@ -236,3 +236,36 @@ def test_review_candidates_are_trimmed_as_they_accumulate():
     assert len(pending) <= queue.candidate_cap
     # the least confident sightings must survive the trimming
     assert min(c["confidence"] for c in pending) == 0.0
+
+
+def test_the_readme_plugin_example_works_as_written():
+    """The README's example is copied into projects; it has to be right.
+    Regression: it flagged steady stock (5, 5, 5) as falling and crashed
+    without a database."""
+    import re
+    from types import SimpleNamespace
+
+    from countbone.types import CountResult, SkuCount
+
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+    source = next(b for b in re.findall(r"```python\n(.*?)```", readme, re.S) if "shrinkage" in b)
+    saved = dict(plugin_base._REGISTRY)
+    try:
+        scope: dict = {}
+        exec(source, scope)  # noqa: S102 - our own README
+        plugin = scope["ShrinkageAnalytics"]()
+        plugin.configure(window=4)
+
+        def run(now: int, past: list[int] | None):
+            store = None if past is None else SimpleNamespace(
+                sku_history=lambda sku, limit: [{"count": c, "location": "A1"} for c in past][:limit])
+            result = CountResult(run_id="run_x", source="x", counts=[SkuCount("SKU-RED", now)])
+            return plugin.on_counts(SimpleNamespace(store=store), result)
+
+        assert run(3, [5, 7]).needs_review                    # 7, 5, 3: falling every count
+        assert not run(5, [5, 5]).needs_review                # steady is not shrinking
+        assert not run(4, [5, 3]).needs_review                # it went up once
+        assert not run(1, None).needs_review                  # no database: nothing to compare
+    finally:
+        plugin_base._REGISTRY.clear()
+        plugin_base._REGISTRY.update(saved)

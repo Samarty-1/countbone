@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from .. import integrations
 from ..integrations import csvio
-from ..ops import OpsError, evidence, labels, receive, reconcile, tasks
+from ..ops import OpsError, checkpoints, evidence, labels, modules, receive, reconcile, tasks
 from ..ops import catalog as catalog_ops
 from ..ops.dataset import export_coco
 from .auth import require
@@ -353,16 +353,22 @@ def router(ctx) -> APIRouter:
         return reconcile.period_report(services, since, until)
 
     # == receive ==================================================================================
-    @r.get("/api/receipts")
+    def receive_on(_: dict = Depends(counter)) -> None:
+        # Off means off here too, not only hidden in the dashboard. Signed in
+        # first, so a stranger gets 401 like everywhere else.
+        if not modules.modules(services)["receive"]:
+            raise HTTPException(404, "Receive is switched off for this site (Settings, Modules)")
+
+    @r.get("/api/receipts", dependencies=[Depends(receive_on)])
     def list_receipts(status: str | None = None, _: dict = Depends(counter)):
         return store.list_receipts(status)
 
-    @r.post("/api/receipts", status_code=201)
+    @r.post("/api/receipts", status_code=201, dependencies=[Depends(receive_on)])
     def create_receipt(body: ReceiptIn, who: dict = Depends(manager)):
         return receive.create(services, body.po_number, body.lines, who, body.supplier, body.dock,
                               "manual", body.note)
 
-    @r.post("/api/receipts/import", status_code=201)
+    @r.post("/api/receipts/import", status_code=201, dependencies=[Depends(receive_on)])
     async def import_receipt(po_number: str = Form(...), supplier: str | None = Form(None),
                              dock: str | None = Form(None), file: UploadFile = File(...),
                              who: dict = Depends(manager)):
@@ -372,7 +378,7 @@ def router(ctx) -> APIRouter:
             raise HTTPException(400, str(exc)) from None
         return receive.create(services, po_number, lines, who, supplier, dock, "csv")
 
-    @r.post("/api/receipts/pull", status_code=201)
+    @r.post("/api/receipts/pull", status_code=201, dependencies=[Depends(receive_on)])
     def pull_receipt(body: ReceiptPull, who: dict = Depends(manager)):
         try:
             po = reconcile.connector_for(services, body.integration).pull_purchase_order(body.po_number)
@@ -382,7 +388,7 @@ def router(ctx) -> APIRouter:
         return receive.create(services, po.po_number, po.lines, who, po.supplier, body.dock,
                               row["kind"] if row else body.integration)
 
-    @r.get("/api/receipts/{receipt_id}")
+    @r.get("/api/receipts/{receipt_id}", dependencies=[Depends(receive_on)])
     def get_receipt(receipt_id: str, _: dict = Depends(counter)):
         receipt = store.get_receipt(receipt_id)
         if receipt is None:
@@ -391,7 +397,7 @@ def router(ctx) -> APIRouter:
         return {**receipt, "discrepancies": receive.discrepancies(receipt), "claims": claims,
                 "audit": store.audit_trail(receipt_id)}
 
-    @r.post("/api/receipts/{receipt_id}/close")
+    @r.post("/api/receipts/{receipt_id}/close", dependencies=[Depends(receive_on)])
     def close_receipt(receipt_id: str, body: Decision, who: dict = Depends(counter)):
         return receive.close(services, receipt_id, who, body.note)
 
@@ -441,11 +447,17 @@ def router(ctx) -> APIRouter:
     @r.get("/api/evidence/public-key")
     def public_key():
         # Deliberately public: anyone holding a pack may check who signed it.
-        return {"key_id": services.keyring.key_id(), "public_key_pem": services.keyring.public_key_pem()}
+        return {"key_id": services.keyring.key_id(), "fingerprint": services.keyring.key_fingerprint(),
+                "public_key_pem": services.keyring.public_key_pem()}
 
     @r.get("/api/audit/verify")
     def verify_chain(_: dict = Depends(manager)):
-        return store.verify_audit_chain()
+        return checkpoints.verify(services)
+
+    @r.post("/api/audit/checkpoint", status_code=201)
+    def checkpoint(who: dict = Depends(admin)):
+        entry = checkpoints.write(services, f"by {who['username']}")
+        return {**entry, "verify": checkpoints.verify(services)}
 
     # == catalog studio =========================================================================
     @r.get("/api/studio/skus")

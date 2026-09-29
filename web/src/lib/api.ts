@@ -548,6 +548,12 @@ export interface Settings {
   organisation: string | null;
   schema_version: number;
   evidence_key_id: string;
+  modules: Modules;
+}
+
+/** Product modules a site can switch off; the server refuses what is off. */
+export interface Modules {
+  receive: boolean;
 }
 
 // -- transport ---------------------------------------------------------------------------
@@ -847,5 +853,5 @@ export const api = {
     request<{ locations: number; rows: number }>(`/api/integrations/${encodeURIComponent(name)}/pull-expected`, json("POST", { locations })),
   deleteIntegration: (name: string) => request<{ ok: boolean }>(`/api/integrations/${encodeURIComponent(name)}`, json("DELETE")),
   settings: () => request<Settings>("/api/settings"),
-  saveSettings: (body: { organisation?: string }) => request<Settings>("/api/settings", json("PUT", body)),
+  saveSettings: (body: { organisation?: string; modules?: Partial<Modules> }) => request<Settings>("/api/settings", json("PUT", body)),
 };

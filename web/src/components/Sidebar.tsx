@@ -23,7 +23,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type LiveRun, type Role, type RunSummary } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { ago, runTitle } from "@/lib/format";
-import { keys, useAuth, useRuns } from "@/lib/queries";
+import { keys, useAuth, useModules, useRuns } from "@/lib/queries";
 import { pageHref, runHref, type Page, type Route } from "@/lib/route";
 import { Kbd } from "./ui";
 
@@ -48,30 +48,12 @@ interface NavItem {
   role?: Role;
   badge?: number;
   tone?: "warn" | "accent";
-  disabled?: boolean;
+  hidden?: boolean;
 }
 
 const RANK: Record<Role, number> = { counter: 0, manager: 1, admin: 2 };
 
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
-  if (item.disabled) {
-    return (
-      <a
-        className={cn(
-          "flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] transition-colors pointer-coarse:h-11",
-          "opacity-50 cursor-not-allowed pointer-events-none text-subtle",
-        )}
-        title="Coming soon — feature complete, not activated"
-        aria-disabled="true"
-      >
-        <item.icon size={15} aria-hidden className="text-subtle" />
-        <span className="flex-1 truncate">{item.label}</span>
-        <span className="rounded px-1.5 font-mono text-[10px] tabular bg-warn/15 text-warn">
-          Soon
-        </span>
-      </a>
-    );
-  }
   return (
     <a
       href={pageHref(item.page)}
@@ -143,6 +125,7 @@ export function Sidebar({ route }: { route: Route }) {
   const activeRun = route.view === "run" ? route.runId : null;
   const activePage = route.view === "page" ? route.page : route.view === "run" ? "runs" : null;
   const proposed = summary.data?.by_status.proposed?.count ?? 0;
+  const modules = useModules();
 
   const groups: { title: string; items: NavItem[] }[] = [
     {
@@ -156,7 +139,7 @@ export function Sidebar({ route }: { route: Route }) {
     {
       title: "Operate",
       items: [
-        { page: "receive", label: "Receive", icon: Truck, disabled: true, tone: "warn" },
+        { page: "receive", label: "Receive", icon: Truck, hidden: !modules?.receive },
         { page: "locations", label: "Locations", icon: MapPin },
         { page: "studio", label: "Catalog studio", icon: Camera },
       ],
@@ -207,7 +190,7 @@ export function Sidebar({ route }: { route: Route }) {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {groups.map((g) => {
-          const items = g.items.filter((i) => !i.role || RANK[role] >= RANK[i.role]);
+          const items = g.items.filter((i) => !i.hidden && (!i.role || RANK[role] >= RANK[i.role]));
           if (!items.length) return null;
           return (
             <div key={g.title} className="mb-2">

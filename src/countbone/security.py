@@ -252,7 +252,12 @@ class Keyring:
         ).decode()
 
     def key_id(self) -> str:
-        return hashlib.sha256(self.public_key_pem().encode()).hexdigest()[:16]
+        return self.key_fingerprint()[:16]
+
+    def key_fingerprint(self) -> str:
+        """SHA-256 of the public key: what a counterparty pins to check a
+        pack's origin. The short key id is for display, not for trust."""
+        return hashlib.sha256(self.public_key_pem().encode()).hexdigest()
 
 
 def verify_signature(public_key_pem: str, data: bytes, signature_b64: str) -> bool:

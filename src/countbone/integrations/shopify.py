@@ -99,21 +99,13 @@ class ShopifyConnector(Connector):
         data = self._gql("{ shop { name } }", {})
         return {"ok": True, "detail": f"connected to {data['shop']['name']}"}
 
-    def pull_expected(self, locations: dict[str, list[str]]) -> dict[str, dict[str, int]]:
+    def pull_expected(self, locations: dict[str, list[str]],
+                      known: list[str] | None = None) -> dict[str, dict[str, int]]:
         """Shopify only knows a whole location's quantity. That is a bay's
         book stock only when the bay *is* the location (map it 1:1); for
         several bays per store, load per-bay expectations from CSV and let
         Shopify receive the deltas."""
-        targets: dict[str, list[str]] = {}
-        for bay in locations:
-            if (t := self.target_location(bay)):
-                targets.setdefault(t, []).append(bay)
-        shared = sorted(b for bays in targets.values() if len(bays) > 1 for b in bays)
-        if shared:
-            raise IntegrationError(
-                "Shopify stock is per store, but these bays share a Shopify location: "
-                f"{', '.join(shared[:6])}. Import per-bay quantities from CSV instead."
-            )
+        self.refuse_shared_book(list(locations), known)
         out: dict[str, dict[str, int]] = {}
         for bay, skus in locations.items():
             target = self.target_location(bay)

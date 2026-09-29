@@ -123,7 +123,11 @@ class NetSuiteConnector(Connector):
         rows = self.suiteql("SELECT id FROM subsidiary WHERE ROWNUM <= 1")
         return {"ok": True, "detail": f"SuiteQL reachable ({len(rows)} row)"}
 
-    def pull_expected(self, locations: dict[str, list[str]]) -> dict[str, dict[str, int]]:
+    def pull_expected(self, locations: dict[str, list[str]],
+                      known: list[str] | None = None) -> dict[str, dict[str, int]]:
+        # Before any request: a shared location is a mapping problem, not a
+        # network one, and the answer would be wrong whatever NetSuite says.
+        self.refuse_shared_book(list(locations), known)
         all_skus = sorted({s for skus in locations.values() for s in skus})
         ids = self._item_ids(all_skus)
         targets = {bay: self.target_location(bay) for bay in locations}

@@ -13,7 +13,9 @@ access to Countbone:
   manifest.json    the SHA-256 of every file above, plus the case data
   signature.json   an Ed25519 signature over manifest.json, and the public
                    key that checks it
-  verify.py        a standalone checker (Python + `cryptography`)
+  verify.py        a standalone checker (Python + `cryptography`); it needs
+                   the issuer's key fingerprint, obtained out of band, to
+                   say who signed (the key in the pack cannot vouch for itself)
 
 Changing any file breaks its hash; changing the manifest breaks the
 signature; and the signing key never leaves the deployment. What the pack
@@ -34,7 +36,7 @@ from pathlib import Path
 from typing import Any
 
 from ..security import role_at_least, verify_signature
-from . import Forbidden, OpsError, Services
+from . import Forbidden, OpsError, Services, checkpoints
 from .final import final_counts
 from .receive import discrepancies
 
@@ -152,7 +154,8 @@ def build_pack(services: Services, claim_id: str, actor: dict[str, Any],
         })
     subjects = [claim_id, *( [receipt["receipt_id"]] if receipt else []), *claim["run_ids"]]
     custody = _custody(services, subjects)
-    chain = store.verify_audit_chain()
+    chain = checkpoints.verify(services)
+    head = store.audit_head()
     files["custody.json"] = _canon({"events": custody, "chain_at_export": chain})
     lines = discrepancies(receipt) if receipt else []
     files["report.html"] = _report(claim, receipt, lines, run_summaries, custody, chain,
@@ -170,7 +173,9 @@ def build_pack(services: Services, claim_id: str, actor: dict[str, Any],
                      "dock": receipt["dock"], "lines": receipt["lines"],
                      "discrepancies": lines} if receipt else None),
         "runs": run_summaries,
-        "audit_chain": {"ok": chain["ok"], "head": chain.get("head"),
+        # Signed, and held by whoever receives the pack: an outside anchor
+        # for the audit trail at this moment (see ops/checkpoints.py).
+        "audit_chain": {"ok": chain["ok"], "head": head["head"], "rows": head["rows"],
                         "events_included": len(custody)},
         "files": {name: _sha(data) for name, data in sorted(files.items())},
         "signer": {"key_id": services.keyring.key_id(),
@@ -202,6 +207,7 @@ def build_pack(services: Services, claim_id: str, actor: dict[str, Any],
                     {"pack_sha256": digest, "manifest_sha256": signature["manifest_sha256"],
                      "files": len(files) + 2, "include_video": include_video},
                     actor=actor["username"])
+    checkpoints.write(services, f"evidence pack {claim_id}")
     return {"path": str(path), "sha256": digest, "bytes": len(data),
             "manifest_sha256": signature["manifest_sha256"]}
 
@@ -311,29 +317,46 @@ Status: {e(claim['status'])}<br>{e(claim.get('note') or '')}</div>
 <p>Every event below is from a hash-chained audit trail (chain {'intact' if chain['ok'] else 'BROKEN'} at export).</p>
 <table><tr><th>When</th><th>Event</th><th>By</th><th>Row hash</th></tr>{events}</table>
 <h2>Checking this pack</h2>
-<p>Run <code>python verify.py</code> in this folder. It checks the Ed25519 signature
-(key id <span class=mono>{e(key_id)}</span>) over manifest.json and the SHA-256 of every file.</p>
+<p>Run <code>python verify.py --key FINGERPRINT</code> in this folder, with the issuer's
+evidence key fingerprint obtained from them directly (not from this pack). It checks the Ed25519
+signature (key id <span class=mono>{e(key_id)}</span>) over manifest.json, the SHA-256 of every
+file, and that the signing key is the one you pinned.</p>
 </body></html>"""
 
 
 README = """Countbone evidence pack
 
-Open report.html for the case. To check that nothing in this folder was
-changed since it was issued, install Python 3 and the `cryptography`
-package, then run:
+Open report.html for the case. To check it, install Python 3 and the
+`cryptography` package, then run:
 
-    python verify.py
+    python verify.py --key FINGERPRINT
 
-It verifies the Ed25519 signature on manifest.json and the SHA-256 of every
-file listed in it. The signing key's public half is in signature.json; ask
-the issuer to confirm its key id out of band if you need to know the pack
-came from them and not only that it is unaltered.
+FINGERPRINT is the issuer's evidence key fingerprint (64 hex characters).
+Get it from the issuer by a channel other than this pack: their website, a
+signed letter, a phone call. The key inside the pack cannot vouch for
+itself: anyone who changed the files could re-sign them with a key of
+their own. Without --key, verify.py still checks that the files match the
+signature in the pack, but says the origin is unchecked.
 """
 
-VERIFY_SCRIPT = r'''"""Verify a Countbone evidence pack: python verify.py [folder-or-zip]"""
+VERIFY_SCRIPT = r'''"""Verify a Countbone evidence pack.
+
+    python verify.py [folder-or-zip] --key FINGERPRINT
+
+Exit 0: signed by the pinned key and every file matches. Exit 1: altered or
+signed by another key. Exit 2: files match the pack's own key, but no
+--key was given, so who issued it is unchecked.
+"""
 import base64, hashlib, json, os, sys, zipfile
 
-def main(target="."):
+def main(argv):
+    pinned = None
+    if "--key" in argv:
+        i = argv.index("--key")
+        if i + 1 >= len(argv):
+            print("--key needs the issuer's fingerprint"); return 1
+        pinned = argv[i + 1].strip().lower(); argv = argv[:i] + argv[i + 2:]
+    target = argv[0] if argv else "."
     if target.endswith(".zip"):
         zf = zipfile.ZipFile(target); read = zf.read; names = set(zf.namelist())
     else:
@@ -341,6 +364,7 @@ def main(target="."):
         names = {os.path.relpath(os.path.join(r, f), target).replace(os.sep, "/")
                  for r, _, fs in os.walk(target) for f in fs}
     manifest_bytes = read("manifest.json"); sig = json.loads(read("signature.json"))
+    fingerprint = hashlib.sha256(sig["public_key_pem"].encode()).hexdigest()
     from cryptography.hazmat.primitives import serialization
     key = serialization.load_pem_public_key(sig["public_key_pem"].encode())
     try:
@@ -352,8 +376,18 @@ def main(target="."):
         if name not in names: print("missing:", name); bad += 1
         elif hashlib.sha256(read(name)).hexdigest() != digest: print("ALTERED:", name); bad += 1
     print("files: %s" % ("all match" if not bad else "%d problem(s)" % bad))
-    return 1 if bad else 0
+    if bad:
+        return 1
+    if pinned is None:
+        print("origin: UNCHECKED. This pack's key fingerprint is\n  %s\n"
+              "Compare it with the one the issuer published, then run with --key." % fingerprint)
+        return 2
+    if pinned != fingerprint:
+        print("origin: DIFFERENT KEY. Signed by %s, not by the key you gave." % fingerprint)
+        return 1
+    print("origin: OK (signed by the pinned key)")
+    return 0
 
 if __name__ == "__main__":
-    sys.exit(main(*(sys.argv[1:] or ["."])))
+    sys.exit(main(sys.argv[1:]))
 '''

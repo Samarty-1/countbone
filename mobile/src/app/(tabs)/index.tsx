@@ -28,13 +28,18 @@ export default function CaptureHome() {
   const [error, setError] = useState<unknown>(null);
   const [offline, setOffline] = useState(false);
   const [walkBusy, setWalkBusy] = useState(false);
+  // Deliveries only where the site has Receive switched on (the server
+  // refuses them otherwise). Off until known, so nothing offers it wrongly.
+  const [receiveOn, setReceiveOn] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       let alive = true;
-      Promise.all([api.locations(), api.receipts(), api.tasks(true), api.serviceJobs()])
-        .then(([l, r, t, j]) => {
+      Promise.all([api.locations(), api.settings(), api.tasks(true), api.serviceJobs()])
+        .then(async ([l, s, t, j]) => {
+          const r = s.modules.receive ? await api.receipts() : [];
           if (!alive) return;
+          setReceiveOn(s.modules.receive);
           setLocations(l);
           setReceipts(r.filter((x) => x.status !== 'closed'));
           setTasks(t);
@@ -67,7 +72,7 @@ export default function CaptureHome() {
       )}
 
       <View style={styles.kinds} accessibilityRole="radiogroup">
-        {KINDS.map(({ kind, label, icon: Icon }) => {
+        {KINDS.filter(({ kind }) => kind !== 'receive' || receiveOn || target.kind === 'receive').map(({ kind, label, icon: Icon }) => {
           const on = target.kind === kind;
           return (
             <Pressable

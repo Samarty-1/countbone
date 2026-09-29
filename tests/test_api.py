@@ -129,6 +129,21 @@ def test_artifacts_cannot_escape_the_run_directory(client):
     assert res.status_code == 404
 
 
+@pytest.mark.parametrize("run_id", ["%2E%2E", "..", "%2E%2E%2F%2E%2E", "_uploads", "run_x%2F..%2F.."])
+def test_the_run_id_cannot_escape_the_output_directory(client, tmp_path, run_id):
+    """Regression: only `path` was confined, inside a root the run id chose.
+
+    With the Docker layout (runs/ next to the database and the key folder) a
+    counter could fetch the database and the secret keys through "%2E%2E".
+    """
+    (tmp_path / "runs" / "_uploads").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "runs" / "_uploads" / "someone.mp4").write_bytes(b"video")
+    counter = signed_in(client.app_, client.store, "carol", "counter")
+    for path in ("api.db", "data/keys/secret.key", "someone.mp4", "tmp/api.db"):
+        res = counter.get(f"/api/runs/{run_id}/artifacts/{path}")
+        assert res.status_code == 404, (run_id, path, res.status_code)
+
+
 def test_one_run_cannot_read_another_runs_artifacts(client, config):
     """Regression: a string-prefix guard let run_1 reach into run_10."""
     root = Path(config.output.dir)

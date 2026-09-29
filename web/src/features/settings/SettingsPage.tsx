@@ -38,6 +38,25 @@ function General() {
         </dl>
       </section>
       <section className="space-y-3 rounded-(--radius-card) border border-line bg-surface p-4">
+        <h2 className="text-[13px] font-semibold">Modules</h2>
+        <p className="text-xs text-subtle">A module switched off disappears from the dashboard and the phone app, and the server refuses it.</p>
+        <label className="flex items-start gap-2 text-[13px]">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={settings.data?.modules.receive ?? false}
+            disabled={!settings.data}
+            onChange={async (e) => {
+              try { await api.saveSettings({ modules: { receive: e.target.checked } }); settings.refetch(); setMsg("Saved"); } catch (err) { setError(err); }
+            }}
+          />
+          <span>
+            <span className="font-medium">Receive</span>
+            <span className="block text-xs text-subtle">Film deliveries and count them against purchase orders; shortages become supplier claims.</span>
+          </span>
+        </label>
+      </section>
+      <section className="space-y-3 rounded-(--radius-card) border border-line bg-surface p-4">
         <h2 className="text-[13px] font-semibold">Your password</h2>
         <Field label="Current password"><Input type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></Field>
         <Field label="New password" hint="At least 10 characters. You will be signed out everywhere."><Input type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /></Field>
