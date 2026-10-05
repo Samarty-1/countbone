@@ -319,9 +319,25 @@ td.num,th.num{text-align:right}
 .close ol{list-style:none;padding:0;margin:0;display:grid;gap:0;border-top:1px solid color-mix(in srgb,var(--bg) 25%,transparent)}
 .close li{display:flex;gap:14px;padding:14px 0;border-bottom:1px solid color-mix(in srgb,var(--bg) 25%,transparent)}
 .close li span{font-family:var(--mono);color:#FF8A47;font-size:13px;padding-top:3px}
-.contact{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-family:var(--mono);font-size:14px}
-.contact .btn{background:transparent;color:var(--bg);border-color:color-mix(in srgb,var(--bg) 35%,transparent)}
+.close .wrap{align-items:start}
+.book{background:var(--surface);color:var(--ink);border-radius:18px;padding:24px;display:grid;gap:18px;box-shadow:var(--shadow);min-width:0}
+.bhead{display:grid;gap:4px}.bhead p{color:var(--muted);font-size:14.5px}
+.fgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.field{display:grid;gap:6px;min-width:0;align-content:start}
+.field.wide{grid-column:1/-1}
+.field label{font-size:13px;font-weight:600}
+.field input,.field select,.field textarea{font:inherit;font-size:15px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-height:44px;width:100%;transition:border-color .2s}
+.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--info);box-shadow:0 0 0 3px var(--info-soft)}
+.field input::placeholder,.field textarea::placeholder{color:var(--muted);opacity:.8}
+.field textarea{resize:vertical}
+.field.bad input{border-color:var(--bad)}
+.field .err{color:var(--bad);font-size:12.5px}
+.bfoot{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.bstatus{font-size:13.5px;color:var(--muted)}
+.book.done{align-content:start;justify-items:start}
+.book.done p{color:var(--muted)}
 @media (max-width:860px){.close .wrap{grid-template-columns:1fr}}
+@media (max-width:520px){.fgrid{grid-template-columns:1fr}}
 footer{padding-block:28px;color:var(--muted);font-size:13px}
 
 .toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translate(-50%,20px);background:var(--ink);color:var(--bg);padding:12px 18px;border-radius:12px;font-weight:600;font-size:14px;opacity:0;transition:all .3s;pointer-events:none;z-index:99;max-width:calc(100% - 32px)}
@@ -525,11 +541,31 @@ footer{padding-block:28px;color:var(--muted);font-size:13px}
 
 <section class="close" id="start">
   <div class="wrap">
-    <div style="display:grid;gap:20px"><p class="eyebrow">Next step</p><h2>Pick two aisles. We'll count them in a week.</h2>
-      <div class="contact"><span id="contact">[your.name@countbone.com]</span><button class="btn" id="copy">Copy email</button></div>
-    </div>
-    <div><p style="margin-bottom:14px;opacity:.8">Success is agreed before we start:</p>
+    <div style="display:grid;gap:20px;align-content:start"><p class="eyebrow">Next step</p><h2>Pick two aisles. We'll count them in a week.</h2>
+      <p style="opacity:.8">Success is agreed before we start:</p>
       <ol><li><span>01</span>Counting time per bay</li><li><span>02</span>Counts that needed no human input</li><li><span>03</span>Accuracy against hand counts</li><li><span>04</span>Value of shortages evidenced</li></ol>
+    </div>
+    <form class="book" id="book" novalidate>
+      <div class="bhead"><h3>Book a pilot</h3><p>Tell us about your site. We reply with a setup date.</p></div>
+      <div class="fgrid">
+        <div class="field"><label for="bk-name">Your name *</label><input id="bk-name" name="name" autocomplete="name" required><span class="err" hidden>Enter your name.</span></div>
+        <div class="field"><label for="bk-company">Company *</label><input id="bk-company" name="company" autocomplete="organization" required><span class="err" hidden>Enter your company.</span></div>
+        <div class="field"><label for="bk-email">Work email *</label><input id="bk-email" name="email" type="email" autocomplete="email" required><span class="err" hidden>Enter an email like name@company.com.</span></div>
+        <div class="field"><label for="bk-phone">Phone</label><input id="bk-phone" name="phone" type="tel" autocomplete="tel"></div>
+        <div class="field"><label for="bk-siteType">Type of site</label><select id="bk-siteType" name="siteType"><option>Warehouse</option><option>3PL</option><option>Retail stores</option><option>Other</option></select></div>
+        <div class="field"><label for="bk-system">Stock system</label><select id="bk-system" name="system"><option>Shopify</option><option>NetSuite</option><option>SAP</option><option>Spreadsheet / CSV</option><option>Other</option></select></div>
+        <div class="field"><label for="bk-sites">Number of sites</label><input id="bk-sites" name="sites" inputmode="numeric" placeholder="e.g. 3"></div>
+        <div class="field"><label for="bk-start">Preferred start</label><input id="bk-start" name="start" type="month"></div>
+        <div class="field wide"><label for="bk-aisles">Aisles to pilot</label><input id="bk-aisles" name="aisles" placeholder="e.g. Aisles A and B, about 40 bays"></div>
+        <div class="field wide"><label for="bk-notes">Anything else</label><textarea id="bk-notes" name="notes" rows="3"></textarea></div>
+      </div>
+      <div class="bfoot"><button class="btn primary" id="bk-send" type="submit">Send request</button><span class="bstatus" id="bk-status" role="status" aria-live="polite"></span></div>
+    </form>
+    <div class="book done" id="bk-done" hidden>
+      <h3 id="bk-done-title">Request sent</h3>
+      <p id="bk-done-text">Thanks. We'll reply with a setup date for your pilot.</p>
+      <a class="btn primary" id="bk-done-link" target="_blank" rel="noopener" hidden>Open the form to send it</a>
+      <button class="btn" id="bk-again" type="button">Send another</button>
     </div>
   </div>
 </section>
@@ -689,8 +725,34 @@ if('IntersectionObserver' in window&&!RM){
 const secs2=['how','app','dashboard','proof','pilot'].map(id=>document.getElementById(id));
 addEventListener('scroll',()=>{let cur='';secs2.forEach(s=>{if(s.getBoundingClientRect().top<160)cur=s.id});$$('.nav ul a').forEach(a=>a.classList.toggle('on',a.getAttribute('href')==='#'+cur))},{passive:true});
 
-$('#copy').addEventListener('click',()=>{const t=$('#contact').textContent;const sel=()=>{const r=document.createRange();r.selectNodeContents($('#contact'));const s=getSelection();s.removeAllRanges();s.addRange(r)};
- try{navigator.clipboard.writeText(t).then(()=>toast('Email copied.'),()=>{sel();toast('Selected. Press Ctrl+C to copy.')})}catch(e){sel();toast('Selected. Press Ctrl+C to copy.')}});
+/* ---------- book a pilot -> Google Form ---------- */
+/* Paste the values printed by presentation/create-pilot-form.gs here. */
+const PILOT_FORM={
+ action:'',  // https://docs.google.com/forms/d/e/<form id>/formResponse
+ fields:{name:'',company:'',email:'',phone:'',siteType:'',system:'',sites:'',start:'',aisles:'',notes:''}  // entry ids, e.g. 'entry.123456789'
+};
+const book=$('#book'),done=$('#bk-done');
+const ready=!!PILOT_FORM.action&&Object.values(PILOT_FORM.fields).every(Boolean);
+const framed=(()=>{try{return window.top!==window}catch(e){return true}})();
+function values(){const v={};new FormData(book).forEach((x,k)=>v[k]=String(x).trim());return v}
+function check(){let ok=true;book.querySelectorAll('.field').forEach(f=>{const i=f.querySelector('input,select,textarea');const e=f.querySelector('.err');if(!e)return;
+ const bad=i.required&&(!i.value.trim()||(i.type==='email'&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(i.value.trim())));f.classList.toggle('bad',bad);e.hidden=!bad;i.setAttribute('aria-invalid',String(bad));if(bad&&ok){i.focus();ok=false}});return ok}
+book.querySelectorAll('input').forEach(i=>i.addEventListener('input',()=>{const f=i.closest('.field');if(f.classList.contains('bad')){f.classList.remove('bad');f.querySelector('.err').hidden=true}}));
+function finish(title,text,link){book.hidden=true;done.hidden=false;$('#bk-done-title').textContent=title;$('#bk-done-text').textContent=text;const a=$('#bk-done-link');a.hidden=!link;if(link)a.href=link;done.scrollIntoView({block:'nearest'})}
+function prefilled(v){const u=new URL(PILOT_FORM.action.replace(/formResponse$/,'viewform'));u.searchParams.set('usp','pp_url');Object.entries(PILOT_FORM.fields).forEach(([k,id])=>{if(v[k])u.searchParams.set(id,v[k])});return u.toString()}
+book.addEventListener('submit',e=>{e.preventDefault();if(!check())return;const v=values();const btn=$('#bk-send');
+ if(!ready){finish('Booking form not connected yet','This page has no Google Form linked, so nothing was sent. The owner needs to connect it (see presentation/README.md).',null);return}
+ if(framed){finish('One more step','Your details are filled in on our Google Form. Open it and press Submit to send them.',prefilled(v));return}
+ btn.disabled=true;$('#bk-status').textContent='Sending…';
+ const name='gf'+Date.now();const ifr=document.createElement('iframe');ifr.name=name;ifr.hidden=true;
+ const f=document.createElement('form');f.method='POST';f.action=PILOT_FORM.action;f.target=name;f.hidden=true;
+ Object.entries(PILOT_FORM.fields).forEach(([k,id])=>{const i=document.createElement('input');i.type='hidden';i.name=id;i.value=v[k]||'';f.appendChild(i)});
+ document.body.appendChild(f);let settled=false,loads=0;
+ // first load is the blank frame: submit then; the second is Google's reply
+ ifr.addEventListener('load',()=>{loads++;if(loads===1){f.submit();return}if(settled)return;settled=true;btn.disabled=false;$('#bk-status').textContent='';finish('Request sent','Thanks, '+v.name.split(' ')[0]+'. We will reply to '+v.email+' with a setup date.',null);f.remove();setTimeout(()=>ifr.remove(),1000)});
+ setTimeout(()=>{if(settled)return;settled=true;btn.disabled=false;$('#bk-status').textContent='';finish('Please confirm on the form','We could not confirm your request went through. Open the form to check and send it.',prefilled(v))},8000);
+ document.body.appendChild(ifr)});
+$('#bk-again').addEventListener('click',()=>{book.reset();done.hidden=true;book.hidden=false;$('#bk-name').focus()});
 })();
 </script>
 
