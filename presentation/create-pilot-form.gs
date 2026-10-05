@@ -16,6 +16,9 @@
  * only once: each run makes a new form, sheet and alert.
  */
 function createPilotForm() {
+  if (PropertiesService.getScriptProperties().getProperty('SHEET_URL')) {
+    throw new Error('Already set up: the form and alert exist. Run sendTestAlert to test.');
+  }
   var form = FormApp.create('Countbone: book a pilot');
   form.setDescription('Tell us about your site and we will reply with a setup date.');
   form.setConfirmationMessage('Thanks. We will reply with a setup date for your pilot.');
@@ -44,15 +47,8 @@ function createPilotForm() {
   // A pre-filled link for one answer reveals that question's entry id.
   var fields = {};
   Object.keys(items).forEach(function (key) {
-    var item = items[key];
-    var answer;
-    if (item.getType() === FormApp.ItemType.MULTIPLE_CHOICE) {
-      answer = item.asMultipleChoiceItem().createResponse('Other');
-    } else if (item.getType() === FormApp.ItemType.PARAGRAPH_TEXT) {
-      answer = item.asParagraphTextItem().createResponse('x');
-    } else {
-      answer = item.asTextItem().createResponse('x');
-    }
+    var item = items[key];  // already a TextItem / MultipleChoiceItem / ParagraphTextItem
+    var answer = item.createResponse(item.getType() === FormApp.ItemType.MULTIPLE_CHOICE ? 'Other' : 'x');
     var url = form.createResponse().withItemResponse(answer).toPrefilledUrl();
     fields[key] = url.match(/(entry\.\d+)=/)[1];
   });

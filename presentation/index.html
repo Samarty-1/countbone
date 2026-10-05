@@ -728,8 +728,8 @@ addEventListener('scroll',()=>{let cur='';secs2.forEach(s=>{if(s.getBoundingClie
 /* ---------- book a pilot -> Google Form ---------- */
 /* Paste the values printed by presentation/create-pilot-form.gs here. */
 const PILOT_FORM={
- action:'',  // https://docs.google.com/forms/d/e/<form id>/formResponse
- fields:{name:'',company:'',email:'',phone:'',siteType:'',system:'',sites:'',start:'',aisles:'',notes:''}  // entry ids, e.g. 'entry.123456789'
+ action:'https://docs.google.com/forms/d/e/1FAIpQLScOPgBhCS3l67mmDt8Tis_apdmL77S57l68a_Yi0AnDHvA-tQ/formResponse',
+ fields:{name:'entry.383458975',company:'entry.873936189',email:'entry.666856039',phone:'entry.1744277927',siteType:'entry.359918735',system:'entry.922999346',sites:'entry.1560593332',start:'entry.996703004',aisles:'entry.941395298',notes:'entry.866471213'}
 };
 const book=$('#book'),done=$('#bk-done');
 const ready=!!PILOT_FORM.action&&Object.values(PILOT_FORM.fields).every(Boolean);
