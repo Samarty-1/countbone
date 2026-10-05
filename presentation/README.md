@@ -29,6 +29,13 @@ replies land in a Google Sheet. Nothing is emailed.
    a `const PILOT_FORM={...};` block.
 3. In `index.html`, search for `const PILOT_FORM=` and replace that block
    (down to its closing `};`) with the one from the log.
+4. Optional: choose `sendTestAlert` in the function menu and click **Run** to
+   check the alert email arrives.
+
+**Alerts:** every new request emails the Google account that ran the script,
+with all the answers and a link to the sheet. Reply to that email to answer
+the client. Run `createPilotForm` only once; each run makes a new form, sheet
+and alert.
 
 How it sends:
 
