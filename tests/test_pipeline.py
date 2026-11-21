@@ -145,14 +145,19 @@ def test_variable_frame_rate_timestamps_do_not_drift(tmp_path, config):
     src = make_demo_video(tmp_path / "cfr.webm", seed=1).path
     vfr = tmp_path / "vfr.mkv"
     # 30 fps for 60 frames, then 15 fps: frame 60 is at exactly 2.000 s.
+    # The explicit millisecond encoder time base matters: without it ffmpeg 9
+    # gives libvpx a 1/24 s tick and VFR mode drops every frame that rounds
+    # onto an occupied tick, so the clip is not the one described above.
     subprocess.run(
         [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-i", src,
          "-vf", "setpts='if(lt(N,60),N/(30*TB),(2+(N-60)/15)/TB)'",
-         "-fps_mode", "vfr", "-c:v", "libvpx", str(vfr)],
+         "-fps_mode", "vfr", "-enc_time_base", "1:1000", "-c:v", "libvpx", str(vfr)],
         check=True,
     )
     config.capture.every_n_frames = 1
+    source_frames = sum(1 for _ in capture.frames(src, config.capture))
     stamps = {f.source_index: f.timestamp_s for f in capture.frames(str(vfr), config.capture)}
+    assert len(stamps) == source_frames, "ffmpeg dropped frames building the VFR fixture"
     assert stamps[60] == pytest.approx(2.0, abs=0.02)
     assert stamps[90] == pytest.approx(4.0, abs=0.02)
 
