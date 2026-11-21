@@ -794,3 +794,29 @@ def test_signed_checkpoints_catch_a_rewritten_or_truncated_audit_trail(env):
         {"rows": 1, "head": "f" * 64, "at": 0, "reason": "x", "key_id": "x", "signature": "AAAA"}) + "\n")
     got = manager.get("/api/audit/verify").json()
     assert not got["ok"] and "not signed" in got["problem"]
+
+
+def test_a_blind_audit_sample_measures_count_accuracy(env, scene):
+    """A random share of SKUs that matched the book is recounted blind, by
+    someone else, and scored against the first count."""
+    counter, manager, store = env["counter"], env["manager"], env["store"]
+    _book(env, "A7", scene.truth)
+    run = wait_run(counter, upload(counter, scene.path, location="A7"))
+    assert counter.post(f"/api/runs/{run['run_id']}/audit-sample", json={}).status_code == 403
+    res = manager.post(f"/api/runs/{run['run_id']}/audit-sample", json={"fraction": 1.0})
+    assert res.status_code == 201, res.text
+    sampled = res.json()["tasks"]
+    assert len(sampled) == len(scene.truth)
+    for t in sampled:          # blind: the recounter sees neither the first count nor the book
+        assert t["kind"] == "audit" and t["counted"] is None and t["expected"] is None
+    first = sampled[0]
+    assert counter.post(f"/api/tasks/{first['task_id']}/complete", json={"count": 1}).status_code == 403
+    cara = login(env["app"], store, "cara", "counter")
+    for k, t in enumerate(sampled):
+        got = scene.truth[t["sku"]] + (1 if k == 0 else 0)          # one recount disagrees
+        assert cara.post(f"/api/tasks/{t['task_id']}/complete", json={"count": got}).status_code == 200
+    acc = manager.get("/api/insights").json()["accuracy"]["sample"]
+    assert acc["recounted"] == len(sampled) and acc["agreed"] == len(sampled) - 1
+    assert acc["disagreements"][0]["sku"] == first["sku"]
+    assert not counter.get("/api/adjustments?location=A7").json()      # a sample changes nothing on the book
+    assert counter.get("/api/insights").status_code == 403

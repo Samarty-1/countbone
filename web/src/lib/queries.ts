@@ -32,6 +32,7 @@ export const keys = {
   integrations: ["integrations"] as const,
   integrationKinds: ["integrationKinds"] as const,
   settings: ["settings"] as const,
+  insights: (perDay: number) => ["insights", perDay] as const,
 };
 
 export const useAuth = () =>

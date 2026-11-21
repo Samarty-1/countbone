@@ -19,6 +19,7 @@ const LocationsPage = lazy(() => import("@/features/locations/LocationsPage").th
 const WalksPage = lazy(() => import("@/features/walks/WalksPage").then((m) => ({ default: m.WalksPage })));
 const StudioPage = lazy(() => import("@/features/studio/StudioPage").then((m) => ({ default: m.StudioPage })));
 const ServicePage = lazy(() => import("@/features/service/ServicePage").then((m) => ({ default: m.ServicePage })));
+const InsightsPage = lazy(() => import("@/features/insights/InsightsPage").then((m) => ({ default: m.InsightsPage })));
 const SettingsPage = lazy(() => import("@/features/settings/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 
 function Content({ route }: { route: Route }) {
@@ -36,6 +37,8 @@ function Content({ route }: { route: Route }) {
       return <ReceivePage id={id} />;
     case "evidence":
       return <EvidencePage id={id} />;
+    case "insights":
+      return <InsightsPage />;
     case "locations":
       return <LocationsPage code={id} />;
     case "walks":

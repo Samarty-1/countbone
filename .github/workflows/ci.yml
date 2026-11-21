@@ -37,6 +37,9 @@ jobs:
       - name: Test
         run: pytest -q --cov=countbone --cov-report=term-missing
 
+      - name: Insights demo classifies every planted cause (exits non-zero otherwise)
+        run: countbone insights --demo
+
   dashboard:
     runs-on: ubuntu-latest
     defaults:

@@ -50,7 +50,7 @@ def complete(services: Services, task_id: str, count: int, actor: dict[str, Any]
     if actor is not None and task["assignee"] and task["assignee"] != actor["user_id"] \
             and not role_at_least(actor["role"], "manager"):
         raise Forbidden("this recount is assigned to someone else")
-    if actor is not None and task["kind"] == "recount" and _is_first_counter(services, task, actor) \
+    if actor is not None and task["kind"] in ("recount", "audit") and _is_first_counter(services, task, actor) \
             and reconcile.rules(services).get("independent_recount"):
         raise Forbidden("a recount has to be done by someone other than the first counter")
     who = actor["username"] if actor else "system"
@@ -62,7 +62,8 @@ def complete(services: Services, task_id: str, count: int, actor: dict[str, Any]
                                            "first_count": task["counted"]}, actor=who)
 
     # Release the adjustment this recount was holding, with the recount's number.
-    adj = store.open_adjustment_for(task["location"], task["sku"])
+    # An audit-sample recount holds none: it only measures the first count.
+    adj = store.open_adjustment_for(task["location"], task["sku"]) if task["kind"] != "audit" else None
     if adj is not None:
         system_qty = adj["system_qty"] or 0
         delta = int(count) - system_qty
@@ -86,7 +87,7 @@ def _is_first_counter(services: Services, task: dict[str, Any], actor: dict[str,
 
 
 def assign_check(services: Services, task: dict[str, Any], assignee: str | None) -> None:
-    if assignee and task["kind"] == "recount" and reconcile.rules(services).get("independent_recount") \
+    if assignee and task["kind"] in ("recount", "audit") and reconcile.rules(services).get("independent_recount") \
             and _is_first_counter(services, task, {"user_id": assignee}):
         raise OpsError("assign the recount to someone other than the first counter")
 

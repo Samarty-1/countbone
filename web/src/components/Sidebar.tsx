@@ -7,6 +7,7 @@ import {
   FileCheck2,
   Footprints,
   History,
+  Lightbulb,
   Loader2,
   LogOut,
   MapPin,
@@ -149,6 +150,7 @@ export function Sidebar({ route }: { route: Route }) {
       items: [
         { page: "reconcile", label: "Reconcile", icon: Scale, badge: proposed, tone: "accent" },
         { page: "evidence", label: "Evidence & claims", icon: FileCheck2 },
+        { page: "insights", label: "Insights", icon: Lightbulb, role: "manager" },
       ],
     },
     {

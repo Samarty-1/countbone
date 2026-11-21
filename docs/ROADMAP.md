@@ -20,8 +20,8 @@ Prove that video in produces a count out, and that the system knows when it is u
 Make a count defensible when somebody disputes it.
 
 - [ ] Anti-gaming controls: who filmed, when, device identity, GPS, server-side timestamps
-- [ ] Blind recount scheduling: a second count with the first one hidden
-- [ ] Sampling audits: recount 5–10% of SKUs and measure agreement
+- [x] Blind recount scheduling: a second count with the first one hidden (the audit sample's tasks show neither number)
+- [x] Sampling audits: recount 5–10% of SKUs and measure agreement (`insights.sample_audit`, agreement with a 95% interval)
 - [ ] Guided capture: pan-speed and coverage feedback while filming
 - [ ] Marker verification: ArUco or QR on the shelf proves which shelf was filmed
 - [ ] Retention policy and face blurring as configurable capture-layer plugins
@@ -32,11 +32,11 @@ Make a count defensible when somebody disputes it.
 
 Turn a count into an operational signal.
 
-- [ ] Shrinkage analytics across counts
-- [ ] Drift tracking per SKU with alerting
-- [ ] Discrepancy cause categorisation (miscount / misplacement / theft / receiving error)
+- [x] Shrinkage analytics across counts (by cause, SKU, location and month)
+- [x] Drift tracking per SKU with alerting (a run of unexplained losses at one bay)
+- [x] Discrepancy cause categorisation (miscount / misplacement / receiving error / unexplained loss or gain; theft is never asserted, only left unexplained)
 - [ ] ERP export connectors
-- [ ] Cycle-count scheduling: what to count next, by value and volatility
+- [x] Cycle-count scheduling: what to count next, by value and volatility (ABC classes, intervals per class, how often a bay's counts change the book)
 - [ ] Finance approval workflow on top of the review queue
 
 ## Detector work, orthogonal to the phases

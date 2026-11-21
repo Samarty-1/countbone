@@ -557,6 +557,78 @@ export interface Modules {
 }
 
 // -- transport ---------------------------------------------------------------------------
+export interface ScheduleRow {
+  location: string;
+  classes: string;
+  a_skus: number;
+  stock_value: number;
+  interval_days: number;
+  last_counted: number | null;
+  days_since: number | null;
+  due: boolean;
+  volatility: number;
+  score: number | null;
+  suggested_day: number | null;
+  why: string;
+}
+
+export type Cause = "miscount" | "misplacement" | "receiving error" | "unexplained loss" | "unexplained gain";
+
+export interface CauseRow {
+  adjustment_id: string;
+  location: string | null;
+  sku: string;
+  delta: number;
+  value: number;
+  status: AdjustmentStatus;
+  created_at: number;
+  cause: Cause;
+  evidence: string;
+  pair?: string;
+}
+
+export interface DriftAlert {
+  location: string;
+  sku: string;
+  losses_in_a_row: number;
+  units: number;
+  value: number;
+  since: number;
+  why: string;
+}
+
+export interface Insights {
+  generated_at: number;
+  settings: { window_days: number; interval_days: Record<string, number>; drift_run: number };
+  schedule: ScheduleRow[];
+  due: number;
+  causes: CauseRow[];
+  shrink: {
+    loss: number;
+    gain: number;
+    net: number;
+    unexplained_loss: number;
+    by_cause: Record<string, number>;
+    by_month: Record<string, number>;
+    worst_skus: { key: string; value: number }[];
+    worst_locations: { key: string; value: number }[];
+    miscounts_caught: number;
+  };
+  drift: DriftAlert[];
+  accuracy: {
+    sample: {
+      recounted: number;
+      agreed: number;
+      agreement: number | null;
+      interval_95: [number, number] | null;
+      mean_abs_error: number | null;
+      open: number;
+      disagreements: { task_id: string; sku: string; location: string; first_count: number; book: number; recount: number }[];
+    };
+    mismatch_recounts: { done: number; count_was_wrong: number; book_was_wrong: number };
+  };
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -758,6 +830,11 @@ export const api = {
     request<ExpectedRow[]>(`/api/locations/${encodeURIComponent(code)}/expected`, json("PUT", { quantities, replace })),
   setPlanogram: (code: string, rows: string[][]) =>
     request<{ rows: string[][] }>(`/api/locations/${encodeURIComponent(code)}/planogram`, json("PUT", { rows })),
+
+  // insights
+  insights: (perDay = 4) => request<Insights>(`/api/insights${q({ per_day: perDay })}`),
+  auditSample: (runId: string, fraction: number) =>
+    request<{ tasks: Task[] }>(`/api/runs/${encodeURIComponent(runId)}/audit-sample`, json("POST", { fraction })),
 
   // tasks
   tasks: (filters: { status?: string; mine?: boolean; location?: string } = {}) => request<Task[]>(`/api/tasks${q(filters)}`),

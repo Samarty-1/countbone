@@ -14,7 +14,17 @@ from pydantic import BaseModel, Field
 
 from .. import integrations
 from ..integrations import csvio
-from ..ops import OpsError, checkpoints, evidence, labels, modules, receive, reconcile, tasks
+from ..ops import (
+    OpsError,
+    checkpoints,
+    evidence,
+    insights,
+    labels,
+    modules,
+    receive,
+    reconcile,
+    tasks,
+)
 from ..ops import catalog as catalog_ops
 from ..ops.dataset import export_coco
 from .auth import require
@@ -57,6 +67,11 @@ class TaskAssign(BaseModel):
 class TaskComplete(BaseModel):
     count: int = Field(ge=0)
     note: str | None = Field(default=None, max_length=500)
+
+
+class AuditSample(BaseModel):
+    fraction: float = Field(default=0.05, gt=0, le=1)
+    minimum: int = Field(default=1, ge=1, le=50)
 
 
 class TaskCancel(BaseModel):
@@ -582,6 +597,15 @@ def router(ctx) -> APIRouter:
         store.update_service_job(job_id, **fields)
         store.add_audit(job_id, "service_job_updated", fields, actor=who["username"])
         return store.get_service_job(job_id)
+
+    # -- insights -------------------------------------------------------------------------
+    @r.get("/api/insights")
+    def get_insights(per_day: int = 4, _: dict = Depends(manager)):
+        return insights.overview(services, per_day=max(1, min(per_day, 200)))
+
+    @r.post("/api/runs/{run_id}/audit-sample", status_code=201)
+    def audit_sample(run_id: str, body: AuditSample, who: dict = Depends(manager)):
+        return {"tasks": insights.sample_audit(services, run_id, who, body.fraction, body.minimum)}
 
     @r.get("/api/datasets/coco.zip")
     def dataset(all_runs: bool = False, frames_per_run: int = 8, _: dict = Depends(admin)):

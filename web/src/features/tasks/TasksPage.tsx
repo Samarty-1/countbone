@@ -32,10 +32,17 @@ function RecountDialog({ task, onClose }: { task: Task; onClose: () => void }) {
   };
   return (
     <Dialog open title={`Recount ${task.sku} at ${task.location ?? "—"}`} onClose={onClose}>
-      <p className="mb-3 text-muted">
-        The video counted <b className="font-mono text-fg">{task.counted}</b>; the book says{" "}
-        <b className="font-mono text-fg">{task.expected}</b>. Count the shelf by hand and enter what is really there.
-      </p>
+      {task.kind === "audit" ? (
+        <p className="mb-3 text-muted">
+          A blind check: count the shelf by hand and enter what is there. You are not shown the earlier count or the
+          book on purpose, so your number measures how accurate the counts are.
+        </p>
+      ) : (
+        <p className="mb-3 text-muted">
+          The video counted <b className="font-mono text-fg">{task.counted}</b>; the book says{" "}
+          <b className="font-mono text-fg">{task.expected}</b>. Count the shelf by hand and enter what is really there.
+        </p>
+      )}
       <div className="space-y-3">
         <Field label="Units on the shelf">
           <Input type="number" min={0} inputMode="numeric" autoFocus value={count} onChange={(e) => setCount(e.target.value)} />
@@ -181,8 +188,14 @@ export function TasksPage() {
                       {overdue && <Badge tone="bad">Overdue</Badge>}
                     </p>
                     <p className="mt-1 text-xs text-muted">
-                      {t.reason} · variance <span className={cn("font-mono", (t.variance ?? 0) < 0 ? "text-bad" : "text-warn")}>{signed(t.variance)}</span>
-                      {t.value_at_risk ? ` · ${money(t.value_at_risk)} at stake` : ""}
+                      {t.kind === "audit" ? (
+                        <>Blind audit sample: the earlier count and the book are hidden</>
+                      ) : (
+                        <>
+                          {t.reason} · variance <span className={cn("font-mono", (t.variance ?? 0) < 0 ? "text-bad" : "text-warn")}>{signed(t.variance)}</span>
+                          {t.value_at_risk ? ` · ${money(t.value_at_risk)} at stake` : ""}
+                        </>
+                      )}
                     </p>
                     <p className="mt-1 text-xs text-subtle">
                       {t.assignee_name ? `Assigned to ${t.assignee_name}` : "Unassigned"}

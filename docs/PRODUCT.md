@@ -18,6 +18,7 @@ changes is where the expected numbers come from and what happens after.
 | **Evidence** | Finance / legal / loss prevention | Ed25519-signed claim packs anyone can verify offline; tamper-evident audit chain | *Evidence & claims* |
 | **Shelf** | Retail merchandising | Empty facings with photos and planogram compliance from the same walk | Run → *Shelf & evidence* |
 | **Count-as-a-Service** | Customers without spare staff | Your crews film their sites on a schedule; consented footage trains better models | *Service jobs*, COCO export |
+| **Insights** | Inventory control / loss prevention / finance | What to count next (ABC by stock value, due dates, volatility); the likely cause of each discrepancy with its evidence; shrink by cause, SKU, bay and month; drift alerts; count accuracy from blind audit samples | *Insights*, `countbone insights` |
 
 ## Why a customer stays
 
@@ -27,6 +28,12 @@ changes is where the expected numbers come from and what happens after.
   vendor means re-teaching every product.
 - **Evidence pays for itself.** A recovered supplier shortage is a number
   finance can put next to the subscription.
+- **Insights turns counting into a decision.** "Bay B-02 has lost SKU-009 four
+  counts running" is a loss-prevention lead. "Three of this month's
+  shortages were short deliveries" is a receiving-dock fix. "Five were
+  miscounts the recount caught" justifies the recount rule. Each sentence
+  needs months of history in countbone, so the longer a customer stays, the
+  more it is worth.
 
 ## Running a pilot (4 weeks)
 
@@ -45,6 +52,9 @@ Receive two or three deliveries per week at one dock door.
 **Week 4, review.** Report: counts per hour vs. the manual baseline, variance
 found and its value, recount hit rate (how often the video was right),
 claims raised and recovered, and accuracy against the hand counts from week 1.
+Run a blind audit sample (*Insights → Sample*, 10% of a few counts) in weeks
+2-3: it gives the count accuracy with a confidence interval, on the customer's
+own shelves, without anyone choosing which counts to check.
 
 **Success criteria to agree up front:** counting time per bay, share of
 counts that needed no human input, accuracy vs. hand count on the pilot
@@ -58,6 +68,7 @@ products, value of shortages evidenced.
 | Count + Reconcile | adds Reconcile and ERP connectors | higher tier per site |
 | Receive | Receive + Evidence for deliveries | per dock door per month |
 | Evidence | claim packs, audit exports | premium add-on, or % of recovered claims |
+| Insights | count schedule, discrepancy causes, shrink and drift, audit samples | in Count + Reconcile; the shrink report as a monthly loss-prevention review |
 | Count-as-a-Service | our crews + the software | per visit or per bay counted |
 
 ## What is true today, and what is not yet

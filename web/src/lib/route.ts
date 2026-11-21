@@ -17,6 +17,7 @@ export const PAGES = [
   "reconcile",
   "receive",
   "evidence",
+  "insights",
   "locations",
   "walks",
   "studio",

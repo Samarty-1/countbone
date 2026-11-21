@@ -21,6 +21,7 @@ packs. Around it sits the product:
 | **Evidence** | Ed25519-signed claim packs anyone can verify offline, over a hash-chained audit trail |
 | **Shelf** | Empty facings (with photos) and planogram compliance from the same walk |
 | **Count-as-a-Service** | Scheduled crew visits; consented footage exported as COCO training data |
+| **Insights** | What to count next (ABC by stock value, due dates, how often a bay's counts change the book); the likely cause of every discrepancy (miscount, misplacement, receiving error, unexplained); shrink by cause; drift alerts for steady pilferage; count accuracy from blind audit samples |
 
 What it is (and is not yet) good for: [docs/PRODUCT.md](docs/PRODUCT.md).
 
@@ -53,6 +54,47 @@ confidence: 96%   needs review: no (0 item(s))
 
 absolute count error: 0 of 34 (0.0%)
 ```
+
+### Insights: what the counts are telling you
+
+```bash
+countbone insights --demo            # six months of synthetic history, scored
+countbone insights --db countbone.db # your own
+```
+
+The demo builds 12 bays and 40 SKUs with six months of counts, and plants
+discrepancies with known causes: five miscounts, three misplacements, three
+receiving errors, one bay losing a high-value SKU four counts in a row, and
+one-off losses and gains, including decoys that only look like a move.
+
+```
+What to count next (3 location(s) due, 4 a day):
+  day 1   C-04       class AB   never counted; 3 A-class SKU(s), stock value 4,633.00; no counts in the window
+  day 1   B-03       class ABC  90 days overdue; 2 A-class SKU(s), stock value 6,625.97; 0 of its last 3 count(s) changed the book
+  ...
+Shrink over 180 days: lost 3,936.54, found 298.09, net -3,638.45; of the loss, 3,560.09 has no explanation
+  misplacement         6 adjustment(s)        0.00
+  receiving error      3 adjustment(s)     -115.00
+  unexplained loss     8 adjustment(s)   -3,560.09
+  miscount             5 caught by a recount before they changed the book
+Drift alerts:
+  B-02     SKU-009    -10 units, -3,338.40: 4 counts in a row found SKU-009 short at B-02 with nothing to explain it
+Count accuracy (blind audit sample): 18/20 recounts agreed, 90% (95% interval 70%-97%)
+
+planted causes classified right: 24/24; planted drift found: yes, other alerts: 0; never-counted and neglected bays first: yes
+```
+
+Sixty random histories were checked during development and every one
+scored perfectly; the tests rerun three. The history is synthetic, so this
+shows the reasoning works, not how often real discrepancies have these
+causes.
+
+Mismatch recounts only look at counts that already disagreed with the book,
+so their agreement rate is biased. A **blind audit sample** fixes that.
+`POST /api/runs/{id}/audit-sample`, or *Insights → Sample*, recounts a
+random share of SKUs that matched the book. The recounter is someone other
+than the first counter and is shown neither number. The result is an
+unbiased accuracy rate with a 95% interval, the figure a pilot report needs.
 
 ## Run the product
 
@@ -238,7 +280,8 @@ cannot take the backbone down mid-count.
 Done on the `product-suite` branch: accounts and roles, adaptive sampling with continuity-aware
 confidence, photo-trained identity, locations and QR labels, walks, recount tasks, Reconcile with
 ERP connectors, Receive, signed Evidence packs, shelf checks, Catalog studio, service jobs, the
-phone app with an offline upload queue, and a Docker deployment.
+phone app with an offline upload queue, and a Docker deployment. Then Insights: cycle-count
+scheduling, discrepancy causes, shrink and drift analytics, and blind audit samples.
 
 Next: a trained detector from pilot footage, external timestamping of evidence, multi-worker
 counting on a shared queue and database for multi-site customers, and native-device testing of the

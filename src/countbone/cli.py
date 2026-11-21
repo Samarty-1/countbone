@@ -235,6 +235,66 @@ def cmd_history(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_insights(args: argparse.Namespace) -> int:
+    """What to count next, why counts disagreed, shrink, drift, count accuracy."""
+    import tempfile
+    from pathlib import Path
+
+    from . import insights_demo
+    from .catalog import Catalog
+    from .ops import Services, insights
+
+    truth = None
+    if args.demo:
+        tmp = Path(tempfile.mkdtemp(prefix="countbone-insights-"))
+        store = Store(tmp / "insights-demo.db")
+        truth = insights_demo.build(store, seed=args.seed)
+        now = truth["now"]
+        print(f"demo history: 12 bays, 40 SKUs, 6 months, in {tmp / 'insights-demo.db'}\n")
+    else:
+        store = Store(args.db or Config().output.sqlite or "countbone.db")
+        now = None
+    services = Services(store=store, keyring=None, data_dir=Path("."), output_dir=Path("."),
+                        catalog=lambda: Catalog.default())
+    ov = insights.overview(services, now, per_day=args.per_day)
+    if args.json:
+        print(json.dumps(ov, indent=1, default=str))
+        return 0
+    print(f"What to count next ({ov['due']} location(s) due, {args.per_day} a day):")
+    for s in ov["schedule"][:args.top]:
+        day = f"day {s['suggested_day']}" if s["suggested_day"] else "later"
+        print(f"  {day:<7} {s['location']:<10} class {s['classes']:<4} {s['why']}")
+    sh = ov["shrink"]
+    print(f"\nShrink over {ov['settings']['window_days']} days: lost {-sh['loss']:,.2f}, found {sh['gain']:,.2f}, "
+          f"net {sh['net']:,.2f}; of the loss, {-sh['unexplained_loss']:,.2f} has no explanation")
+    for cause, v in sh["by_cause"].items():
+        n = sum(1 for r in ov["causes"] if r["cause"] == cause)
+        print(f"  {cause:<18} {n:>3} adjustment(s)  {v:>10,.2f}")
+    print(f"  {'miscount':<18} {sh['miscounts_caught']:>3} caught by a recount before they changed the book")
+    print("\nDrift alerts:" if ov["drift"] else "\nDrift alerts: none")
+    for a in ov["drift"]:
+        print(f"  {a['location']:<8} {a['sku']:<10} {a['units']:+d} units, {a['value']:,.2f}: {a['why']}")
+    acc = ov["accuracy"]
+    smp = acc["sample"]
+    if smp["recounted"]:
+        lo, hi = smp["interval_95"]
+        print(f"\nCount accuracy (blind audit sample): {smp['agreed']}/{smp['recounted']} recounts agreed, "
+              f"{smp['agreement']:.0%} (95% interval {lo:.0%}-{hi:.0%})")
+    else:
+        print("\nCount accuracy: no blind audit sample yet (POST /api/runs/{id}/audit-sample)")
+    mr = acc["mismatch_recounts"]
+    print(f"Mismatch recounts: {mr['done']} done; the first count was wrong in {mr['count_was_wrong']}, "
+          f"the book in {mr['book_was_wrong']}")
+    if truth is not None:
+        sc = insights_demo.score(ov, truth)
+        print(f"\nplanted causes classified right: {sc['causes_right']}/{sc['causes_planted']}; "
+              f"planted drift found: {'yes' if sc['drift_found'] else 'NO'}, other alerts: {sc['drift_false_alarms']}; "
+              f"never-counted and neglected bays first: {'yes' if sc['overdue_first'] else 'NO'}")
+        return 0 if (sc["causes_right"] == sc["causes_planted"] and sc["drift_found"]
+                     and not sc["drift_false_alarms"] and sc["overdue_first"]) else 1
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="countbone",
@@ -311,6 +371,15 @@ def build_parser() -> argparse.ArgumentParser:
     history.add_argument("--limit", type=int, default=50)
     history.add_argument("--db")
     history.set_defaults(func=cmd_history)
+
+    ins = sub.add_parser("insights", help="what to count next, shrink by cause, drift alerts, count accuracy")
+    ins.add_argument("--db")
+    ins.add_argument("--demo", action="store_true", help="on six months of synthetic history, scored")
+    ins.add_argument("--seed", type=int, default=4)
+    ins.add_argument("--per-day", type=int, default=4, help="locations the team can count a day")
+    ins.add_argument("--top", type=int, default=10, help="schedule rows to show")
+    ins.add_argument("--json", action="store_true")
+    ins.set_defaults(func=cmd_insights)
 
     return parser
 
